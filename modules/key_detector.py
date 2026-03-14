@@ -132,6 +132,15 @@ PATTERNS = {
     "json_wif": re.compile(
         r'"(?:wif|WIF|importFormat)"\s*:\s*"([5KLc][1-9A-HJ-NP-Za-km-z]{50,51})"',
     ),
+    # PEM-encoded private key block (RSA/EC/DSA/OPENSSH) — the HackerMD finding type:
+    # hardcoded inside JS bundles as TRACK_PRIVATE_KEY or similar config variables.
+    # Matches the full -----BEGIN * PRIVATE KEY----- ... -----END * PRIVATE KEY----- block.
+    "rsa_pem_key": re.compile(
+        r'-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'
+        r'[\s\S]{64,3500}?'
+        r'-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----',
+        re.MULTILINE,
+    ),
     # Public key exposure (lower severity but still notable)
     "eth_public_key": re.compile(
         r'(?i)(?:public[_\s]?key|publicKey)["\s:=]+["\']?(0x)?[0-9a-f]{128}["\']?',
@@ -153,6 +162,7 @@ SEVERITY_MAP = {
     "solana_uint8array": "CRITICAL",
     "json_private_field": "CRITICAL",
     "json_wif": "CRITICAL",
+    "rsa_pem_key": "CRITICAL",
     "raw_hex_64": "HIGH",
     "solana_pubkey": "LOW",
     "eth_public_key": "LOW",
@@ -171,6 +181,7 @@ TYPE_NAMES = {
     "solana_pubkey": "Solana Public Key",
     "json_private_field": "JSON Private Key Field",
     "json_wif": "WIF Key in JSON",
+    "rsa_pem_key": "PEM Private Key (RSA/EC/DSA/OpenSSH)",
     "raw_hex_64": "Raw 64-char Hex (possible private key)",
     "eth_public_key": "Ethereum Public Key",
     "eth_address": "Ethereum Address",

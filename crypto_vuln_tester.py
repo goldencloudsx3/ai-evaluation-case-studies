@@ -219,6 +219,70 @@ def print_summary(target, idor_result, crawl_result, auth_info, report_files):
     for note in auth_info.get("notes", []):
         print(f"\n  {YEL}[!]{R} {note}")
 
+    # ── OpenSSL key confirmation (HackerMD Phase 2 validation protocol) ───────
+    pem_findings = [
+        f for f in findings
+        if f.keys_found and any(k.get("type") == "rsa_pem_key" for k in f.keys_found)
+    ]
+    if pem_findings:
+        print(f"\n  {CYAN}{BOLD}◈  PEM KEY CONFIRMATION — OpenSSL Validation Steps{R}")
+        print(f"  {DIM}{'╌'*62}{R}")
+        print(f"  {DIM}# Phase 2: Validate the key is real before reporting{R}")
+        print(f"  {YEL}  cat > extracted.key << 'EOF'{R}")
+        print(f"  {DIM}  -----BEGIN RSA PRIVATE KEY-----{R}")
+        print(f"  {DIM}  <paste key material here>{R}")
+        print(f"  {DIM}  -----END RSA PRIVATE KEY-----{R}")
+        print(f"  {YEL}  EOF{R}")
+        print()
+        print(f"  {YEL}  openssl rsa -in extracted.key -check -noout{R}"
+              f"  {DIM}# → RSA key ok{R}")
+        print(f"  {YEL}  openssl rsa -in extracted.key -text -noout{R} "
+              f"  {DIM}# → shows bit-length, modulus, publicExponent{R}")
+        print()
+        print(f"  {DIM}  Confirmed real? Check if key signs JWT tokens:{R}")
+        print(f"  {DIM}  Look for TRACK_PRIVATE_KEY / config objects in the same JS bundle{R}")
+        print(f"  {DIM}  Find ACTUAL endpoints via DevTools → Network → XHR before testing{R}")
+
+    # ── OPSEC endpoint discovery protocol (HackerMD Mistake #1) ──────────────
+    if n_total > 0:
+        print(f"\n  {CYAN}{BOLD}◈  OPSEC — Endpoint Discovery Protocol{R}")
+        print(f"  {DIM}{'╌'*62}{R}")
+        print(f"  {DIM}Do NOT guess routes. Capture real traffic instead:{R}")
+        _steps = [
+            "Open target website in browser",
+            "DevTools → Network tab → Filter XHR / Fetch",
+            "Perform real actions: login, trade, deposit",
+            "Capture ACTUAL API calls from the traffic tab",
+            "Test forged tokens ONLY on those real endpoints",
+        ]
+        for i, step in enumerate(_steps, 1):
+            print(f"    {DIM}{i}.{R} {step}")
+        print()
+        print(f"  {DIM}HTTP 200 + {{\"msg\": \"route not found\"}} ≠ token accepted{R}")
+        print(f"  {DIM}HTTP 200 + {{\"user_id\": ..., \"balance\": ...}}  = real exploitation{R}")
+
+    # ── Final checklist (HackerMD — Before You Ever Report Again) ─────────────
+    if n_crit > 0:
+        print(f"\n  {GRN}{BOLD}◈  FINAL CHECKLIST — Before Submitting Any Bug Report{R}")
+        print(f"  {DIM}{'╌'*62}{R}")
+        _checklist = [
+            ("Captured real API traffic (not guesses)",         True),
+            ("Tested on actual working endpoints",               True),
+            ("Got real data back (not error messages)",          True),
+            ("Screenshot proof captured",                        True),
+            ("CIA triad impact demonstrated:",                   True),
+            ("  Confidentiality  →  Data accessed",             False),
+            ("  Integrity        →  Data modified",             False),
+            ("  Availability     →  Service disrupted",         False),
+            ("Report is under 1000 words",                       True),
+            ("Steps are reproducible by anyone",                 True),
+            ("Impact is shown, not theorized",                   True),
+        ]
+        for item, show_box in _checklist:
+            prefix = f"  {DIM}□{R} " if show_box else "      "
+            print(f"  {prefix}{item}")
+        print(f"\n  {DIM}If you can't check all these boxes — keep testing.{R}")
+
     # ── Report files ─────────────────────────────────────────────────────────
     if report_files:
         print(f"\n  {BOLD}Reports saved:{R}")
