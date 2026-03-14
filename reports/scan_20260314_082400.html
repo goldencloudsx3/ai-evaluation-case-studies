@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Crypto Vulnerability Scan Report</title>
+<style>
+  body { font-family: monospace; background: #0d1117; color: #c9d1d9; padding: 2em; }
+  h1 { color: #58a6ff; }
+  h2 { color: #79c0ff; border-bottom: 1px solid #30363d; padding-bottom: 4px; }
+  h3 { color: #d29922; }
+  .critical { color: #f85149; font-weight: bold; }
+  .high { color: #d29922; font-weight: bold; }
+  .medium { color: #58a6ff; }
+  .low { color: #3fb950; }
+  .info { color: #8b949e; }
+  .finding { background: #161b22; border-left: 4px solid; padding: 1em; margin: 1em 0; border-radius: 4px; }
+  .finding.critical { border-color: #f85149; }
+  .finding.high { border-color: #d29922; }
+  .finding.medium { border-color: #58a6ff; }
+  .finding.low { border-color: #3fb950; }
+  .code { background: #0d1117; padding: 0.5em; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  .warning { background: #161b22; border: 1px solid #d29922; padding: 1em; margin: 1em 0; border-radius: 4px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #30363d; padding: 8px 12px; text-align: left; }
+  th { background: #161b22; color: #58a6ff; }
+  tr:nth-child(even) { background: #0d1117; }
+</style>
+</head>
+<body>
+<h1>🔐 Crypto Vulnerability Scan Report</h1>
+<div class="warning">
+  ⚠️ <strong>AUTHORIZED TESTING ONLY</strong> — This report was generated for
+  security research purposes on a target for which explicit written authorization
+  was obtained. Unauthorized use of these findings is illegal.
+</div>
+
+<h2>Scan Summary</h2>
+<table>
+  <tr><th>Field</th><th>Value</th></tr>
+  <tr><td>Target</td><td>https://pagangods.io</td></tr>
+  <tr><td>Scan Date</td><td>2026-03-14 08:24 UTC</td></tr>
+  <tr><td>Endpoints Tested</td><td>1677</td></tr>
+  <tr><td>IDs Enumerated</td><td>39</td></tr>
+  <tr><td>Total Findings</td><td>0</td></tr>
+  <tr><td>Critical</td><td class="critical">0</td></tr>
+  <tr><td>High</td><td class="high">0</td></tr>
+  <tr><td>Medium</td><td class="medium">0</td></tr>
+  <tr><td>Low/Info</td><td class="low">0</td></tr>
+</table>
+
+<h2>Discovered Endpoints</h2>
+
+<table>
+  <tr>
+    <th>Status</th><th>URL</th><th>Source</th>
+    <th>Key-Related</th><th>Auth Required</th>
+  </tr>
+  <tr><td>200</td><td><code>https://pagangods.io/signin</code></td><td>crawl</td><td>✓</td><td></td></tr>
+<tr><td>200</td><td><code>https://pagangods.io/signup</code></td><td>crawl</td><td>✓</td><td></td></tr>
+<tr><td>200</td><td><code>https://pagangods.io/api/getLocale?v=3&lang=</code></td><td>js_analysis</td><td></td><td></td></tr>
+<tr><td>200</td><td><code>https://pagangods.io/api/user/support/send</code></td><td>js_analysis</td><td></td><td></td></tr>
+<tr><td>200</td><td><code>https://pagangods.io/api/user/profile</code></td><td>js_analysis</td><td></td><td></td></tr>
+<tr><td>200</td><td><code>https://pagangods.io/api/user</code></td><td>wordlist</td><td></td><td></td></tr>
+<tr><td>200</td><td><code>https://pagangods.io/api/user/wallet</code></td><td>wordlist</td><td>✓</td><td></td></tr>
+<tr><td>200</td><td><code>https://pagangods.io/api/user/keys</code></td><td>wordlist</td><td>✓</td><td></td></tr>
+<tr><td>405</td><td><code>https://pagangods.io/api/auth/login</code></td><td>wordlist</td><td></td><td></td></tr>
+<tr><td>200</td><td><code>https://pagangods.io/api/admin</code></td><td>wordlist</td><td></td><td></td></tr>
+<tr><td>200</td><td><code>https://pagangods.io/api/admin/users</code></td><td>wordlist</td><td></td><td></td></tr>
+<tr><td>200</td><td><code>https://pagangods.io/api/admin/wallets</code></td><td>wordlist</td><td>✓</td><td></td></tr>
+<tr><td>200</td><td><code>https://pagangods.io/admin/api</code></td><td>wordlist</td><td></td><td></td></tr>
+<tr><td>200</td><td><code>https://pagangods.io/admin/api/keys</code></td><td>wordlist</td><td>✓</td><td></td></tr>
+
+</table>
+
+
+<h2>IDOR / Key Exposure Findings</h2>
+<p>No IDOR/key exposure findings.</p>
+
+<h2>Remediation Guidance</h2>
+<pre class="code">
+REMEDIATION:
+  1. Implement proper authorization checks on ALL key/wallet endpoints.
+     Verify that the authenticated user owns the requested resource.
+  2. Do NOT use sequential integer IDs for sensitive resources. Use
+     UUIDs or other non-guessable identifiers.
+  3. Never return private key material in API responses. If export is
+     required, use one-time tokens with short expiry.
+  4. Implement rate limiting on key endpoints.
+  5. Log and alert on any attempt to access another user's keys.
+
+REFERENCES:
+  - OWASP Broken Access Control: https://owasp.org/Top10/A01_2021-Broken_Access_Control/
+  - OWASP IDOR: https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/05-Authorization_Testing/04-Testing_for_Insecure_Direct_Object_References
+
+REMEDIATION:
+  1. NEVER return raw private keys, WIF keys, mnemonics, or seed phrases
+     in HTTP responses.
+  2. For wallet export features, encrypt key material client-side before
+     transmission, or use hardware security modules (HSMs).
+  3. If key backup is required, implement secure export flows:
+     - Require additional authentication (2FA, PIN)
+     - Use encrypted containers
+     - Log the access event
+  4. Audit all API endpoints for unintended key material leakage.
+</pre>
+
+<hr>
+<p style="color: #8b949e; font-size: 0.8em;">
+Generated by Crypto Vulnerability Tester |
+For authorized security testing only |
+2026-03-14 08:24 UTC
+</p>
+</body>
+</html>

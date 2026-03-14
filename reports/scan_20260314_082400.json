@@ -1,0 +1,139 @@
+{
+  "meta": {
+    "tool": "Crypto Vulnerability Tester",
+    "version": "1.0.0",
+    "scan_date": "2026-03-14T08:24:00.781239",
+    "target": "https://pagangods.io",
+    "authorization": "AUTHORIZED TESTING ONLY"
+  },
+  "auth_info": {
+    "scheme": "Cookie/Session",
+    "login_endpoint": "https://pagangods.io/api/auth/login",
+    "token_field": null,
+    "notes": []
+  },
+  "summary": {
+    "endpoints_tested": 1677,
+    "ids_tested": 39,
+    "total_findings": 0,
+    "critical": 0,
+    "high": 0,
+    "medium": 0
+  },
+  "idor_findings": [],
+  "discovered_endpoints": [
+    {
+      "url": "https://pagangods.io/signin",
+      "method": "GET",
+      "source": "crawl",
+      "status_code": 200,
+      "key_related": true,
+      "auth_required": false
+    },
+    {
+      "url": "https://pagangods.io/signup",
+      "method": "GET",
+      "source": "crawl",
+      "status_code": 200,
+      "key_related": true,
+      "auth_required": false
+    },
+    {
+      "url": "https://pagangods.io/api/getLocale?v=3&lang=",
+      "method": "GET",
+      "source": "js_analysis",
+      "status_code": 200,
+      "key_related": false,
+      "auth_required": false
+    },
+    {
+      "url": "https://pagangods.io/api/user/support/send",
+      "method": "GET",
+      "source": "js_analysis",
+      "status_code": 200,
+      "key_related": false,
+      "auth_required": false
+    },
+    {
+      "url": "https://pagangods.io/api/user/profile",
+      "method": "GET",
+      "source": "js_analysis",
+      "status_code": 200,
+      "key_related": false,
+      "auth_required": false
+    },
+    {
+      "url": "https://pagangods.io/api/user",
+      "method": "GET",
+      "source": "wordlist",
+      "status_code": 200,
+      "key_related": false,
+      "auth_required": false
+    },
+    {
+      "url": "https://pagangods.io/api/user/wallet",
+      "method": "GET",
+      "source": "wordlist",
+      "status_code": 200,
+      "key_related": true,
+      "auth_required": false
+    },
+    {
+      "url": "https://pagangods.io/api/user/keys",
+      "method": "GET",
+      "source": "wordlist",
+      "status_code": 200,
+      "key_related": true,
+      "auth_required": false
+    },
+    {
+      "url": "https://pagangods.io/api/auth/login",
+      "method": "GET",
+      "source": "wordlist",
+      "status_code": 405,
+      "key_related": false,
+      "auth_required": false
+    },
+    {
+      "url": "https://pagangods.io/api/admin",
+      "method": "GET",
+      "source": "wordlist",
+      "status_code": 200,
+      "key_related": false,
+      "auth_required": false
+    },
+    {
+      "url": "https://pagangods.io/api/admin/users",
+      "method": "GET",
+      "source": "wordlist",
+      "status_code": 200,
+      "key_related": false,
+      "auth_required": false
+    },
+    {
+      "url": "https://pagangods.io/api/admin/wallets",
+      "method": "GET",
+      "source": "wordlist",
+      "status_code": 200,
+      "key_related": true,
+      "auth_required": false
+    },
+    {
+      "url": "https://pagangods.io/admin/api",
+      "method": "GET",
+      "source": "wordlist",
+      "status_code": 200,
+      "key_related": false,
+      "auth_required": false
+    },
+    {
+      "url": "https://pagangods.io/admin/api/keys",
+      "method": "GET",
+      "source": "wordlist",
+      "status_code": 200,
+      "key_related": true,
+      "auth_required": false
+    }
+  ],
+  "errors": []
+}
