@@ -11,17 +11,24 @@ described in:
 
 VULNERABILITY CLASS:
   IDOR (Insecure Direct Object Reference) on wallet/key management API
-  endpoints. Attacker authenticates, discovers their own numeric ID,
-  then enumerates adjacent IDs to access other users' private keys.
+  endpoints. No account registration required — uses differential/baseline
+  analysis to detect IDOR without any prior knowledge of valid IDs.
+
+HOW IT WORKS (no account needed):
+  1. For each endpoint pattern, probe with a known-invalid canary ID to
+     learn what "not found" looks like for that endpoint.
+  2. Enumerate sequential IDs (1..N) and compare each response against
+     the "not found" baseline — deviations indicate a real object was hit.
+  3. Scan every response body for cryptographic key material directly.
 
 USAGE:
   python crypto_vuln_tester.py --target https://example.com [OPTIONS]
 
   --target      Target base URL (REQUIRED — must have written authorization)
-  --id          Your known user/wallet ID (for adjacent enumeration)
-  --token       Bearer token or API key for authenticated requests
-  --cookie      Session cookie string (name=value)
-  --max-ids     Number of IDs to enumerate (default: 20)
+  --id          Optional anchor ID (e.g. seen on a public profile page)
+  --token       Optional Bearer token or API key (for auth-protected endpoints)
+  --cookie      Optional session cookie string (name=value)
+  --max-ids     Number of IDs to enumerate (default: 30)
   --delay       Delay between requests in seconds (default: 0.5)
   --no-crawl    Skip site crawling, only test known API patterns
   --output-dir  Directory to save reports (default: ./reports)
@@ -141,7 +148,7 @@ def main():
     )
     parser.add_argument(
         "--id", dest="seed_id", type=int, default=None,
-        help="Your known user/wallet ID (enables adjacent ID enumeration)",
+        help="Optional anchor ID seen on a public page (no account needed)",
     )
     parser.add_argument(
         "--token", default=None,
@@ -152,8 +159,8 @@ def main():
         help="Session cookie string (e.g. 'session=abc123; token=xyz')",
     )
     parser.add_argument(
-        "--max-ids", type=int, default=20,
-        help="Number of IDs to enumerate (default: 20)",
+        "--max-ids", type=int, default=30,
+        help="Number of IDs to enumerate (default: 30)",
     )
     parser.add_argument(
         "--delay", type=float, default=0.5,
@@ -259,11 +266,13 @@ def main():
     # ──────────────────────────────────────────────────────────
     print_phase("3/4 — IDOR Key Exposure Scan")
 
+    print("  [*] Mode: differential baseline analysis (no account required)")
     if args.seed_id:
-        print(f"  [*] Using seed ID {args.seed_id} for adjacent enumeration")
+        print(f"  [*] Anchor ID {args.seed_id} provided — enumerating neighbors")
     else:
-        print("  [*] No seed ID provided — using sequential 1..N enumeration")
-        print("  [!] TIP: Use --id <your_user_id> for more targeted results")
+        print("  [*] No anchor ID — enumerating sequential IDs 1..N")
+        print("  [!] TIP: If you spot a numeric ID on a public page (profile, tx, etc.)")
+        print("           pass it with --id N to enumerate around a real user range")
 
     print(f"  [*] Enumerating up to {args.max_ids} IDs per endpoint pattern")
     print(f"  [*] Testing {len([p for p in __import__('modules.idor_scanner', fromlist=['KEY_ENDPOINT_PATTERNS']).KEY_ENDPOINT_PATTERNS])} endpoint patterns\n")
@@ -281,7 +290,8 @@ def main():
 
     print(f"  [+] Scan complete in {elapsed:.1f}s")
     print(f"  [+] Tested {idor_result.endpoints_tested} endpoint+ID combinations")
-    print(f"  [+] Found {len(idor_result.findings)} findings")
+    print(f"  [+] Live IDOR candidates (differential): {idor_result.live_endpoints}")
+    print(f"  [+] Total findings: {len(idor_result.findings)}")
 
     # ──────────────────────────────────────────────────────────
     # PHASE 4: Reporting

