@@ -47,6 +47,10 @@ CRYPTO_API_WORDLIST = [
     "api/sign", "api/sign/transaction", "api/signer",
     # Transaction endpoints (may reveal key material)
     "api/transaction", "api/tx", "api/transfer",
+    # Solana-specific
+    "api/solana/wallet", "api/solana/keypair", "api/solana/account",
+    "api/solana/key", "api/keypair", "api/keypair/export",
+    "api/solana/user", "api/solana/wallet/export",
     # Node/validator
     "api/node", "api/validator", "api/validator/keys",
     # Auth endpoints (to understand session/token model)

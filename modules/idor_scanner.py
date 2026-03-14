@@ -57,7 +57,7 @@ KEY_ENDPOINT_PATTERNS = [
     "/account/{id}/export",
     "/user/{id}/wallet",
     "/user/{id}/keys",
-    # Blockchain-specific
+    # Blockchain-specific (EVM)
     "/api/address/{id}/privatekey",
     "/api/address/{id}/wif",
     "/api/address/{id}/export",
@@ -66,6 +66,17 @@ KEY_ENDPOINT_PATTERNS = [
     "/api/keystore/{id}",
     "/api/vault/{id}",
     "/api/vault/{id}/unlock",
+    # Solana-specific endpoints
+    "/api/solana/wallet/{id}",
+    "/api/solana/wallet/{id}/keypair",
+    "/api/solana/wallet/{id}/export",
+    "/api/solana/account/{id}",
+    "/api/solana/account/{id}/keys",
+    "/api/solana/keypair/{id}",
+    "/api/keypair/{id}",
+    "/api/keypair/{id}/export",
+    "/api/solana/key/{id}",
+    "/api/solana/user/{id}/wallet",
     # GraphQL
     "/graphql",
 ]
@@ -74,10 +85,14 @@ KEY_ENDPOINT_PATTERNS = [
 CANARY_IDS = ["999999999", "00000000-dead-beef-0000-000000000000", "____invalid____"]
 
 GRAPHQL_QUERIES = [
+    # Generic
     '{"query": "{ wallet(id: ID_PLACEHOLDER) { privateKey publicKey address } }"}',
     '{"query": "{ user(id: ID_PLACEHOLDER) { wallet { privateKey publicKey } } }"}',
     '{"query": "{ key(id: ID_PLACEHOLDER) { private public } }"}',
     '{"query": "query GetWallet($id: ID!) { wallet(id: $id) { privateKey publicKey mnemonic } }", "variables": {"id": "ID_PLACEHOLDER"}}',
+    # Solana-specific
+    '{"query": "{ solanaWallet(id: ID_PLACEHOLDER) { secretKey publicKey keypair } }"}',
+    '{"query": "{ keypair(id: ID_PLACEHOLDER) { secretKey publicKey encoded } }"}',
 ]
 
 
@@ -360,6 +375,9 @@ class IDORScanner:
             "privatekey", "private_key", "publickey", "public_key",
             "mnemonic", "seedphrase", "seed_phrase", "keystore",
             "wif", "xpriv", "xpub", "address", "wallet", "keypair",
+            # Solana-specific
+            "secretkey", "secret_key", "signingkey", "solana",
+            "pubkey", "lamports", "blockhash",
         ]
         content_lower = content.lower()
         return sum(1 for f in crypto_fields if f in content_lower) >= 2

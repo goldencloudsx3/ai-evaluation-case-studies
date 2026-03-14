@@ -109,9 +109,19 @@ PATTERNS = {
     "mnemonic_hint": re.compile(
         r'(?i)(?:mnemonic|seed[_\s]?phrase|recovery[_\s]?phrase|secret[_\s]?phrase)["\s:=]+["\']?([a-z]+ ){11,23}[a-z]+["\']?',
     ),
-    # Solana/Substrate base58 private keys (~87-88 chars base58)
+    # Solana full keypair as base58 — 64 bytes base58-encoded (~87-88 chars)
+    # This is the format Phantom, Solflare, and solana-keygen use for exports
     "solana_private_key": re.compile(
-        r'(?i)(?:private[_\s]?key|secret)["\s:=]+["\']?[1-9A-HJ-NP-Za-km-z]{87,88}["\']?',
+        r'(?i)(?:private[_\s]?key|secret[_\s]?key|keypair)["\s:=]+["\']?[1-9A-HJ-NP-Za-km-z]{87,88}["\']?',
+    ),
+    # Solana keypair as Uint8Array / JSON integer array — [1,2,...,64 bytes]
+    # This is what solana-keygen outputs and what many backend services store
+    "solana_uint8array": re.compile(
+        r'\[\s*(?:[0-9]{1,3}\s*,\s*){63}[0-9]{1,3}\s*\]',
+    ),
+    # Solana public key — 32 bytes base58 = 43-44 chars
+    "solana_pubkey": re.compile(
+        r'(?i)(?:public[_\s]?key|pubkey|owner)["\s:=]+["\']?[1-9A-HJ-NP-Za-km-z]{43,44}["\']?',
     ),
     # Generic JSON field named after private key material
     "json_private_field": re.compile(
@@ -140,9 +150,11 @@ SEVERITY_MAP = {
     "keystore_json": "CRITICAL",
     "mnemonic_hint": "CRITICAL",
     "solana_private_key": "CRITICAL",
+    "solana_uint8array": "CRITICAL",
     "json_private_field": "CRITICAL",
     "json_wif": "CRITICAL",
-    "raw_hex_64": "HIGH",    # Could be a private key, needs manual review
+    "raw_hex_64": "HIGH",
+    "solana_pubkey": "LOW",
     "eth_public_key": "LOW",
     "eth_address": "INFO",
 }
@@ -154,7 +166,9 @@ TYPE_NAMES = {
     "xpriv": "Extended Private Key (xpriv/zpriv)",
     "keystore_json": "Encrypted Keystore JSON",
     "mnemonic_hint": "BIP39 Mnemonic/Seed Phrase",
-    "solana_private_key": "Solana/Substrate Private Key",
+    "solana_private_key": "Solana Keypair (base58)",
+    "solana_uint8array": "Solana Keypair (Uint8Array/JSON bytes)",
+    "solana_pubkey": "Solana Public Key",
     "json_private_field": "JSON Private Key Field",
     "json_wif": "WIF Key in JSON",
     "raw_hex_64": "Raw 64-char Hex (possible private key)",
@@ -259,7 +273,10 @@ class KeyDetector:
         sensitive_field_names = {
             "privatekey", "private_key", "secretkey", "secret_key",
             "privkey", "priv_key", "wif", "mnemonic", "seed", "seedphrase",
-            "seed_phrase", "xpriv", "zpriv", "keystore", "privateKeyHex",
+            "seed_phrase", "xpriv", "zpriv", "keystore", "privatekeyhex",
+            # Solana-specific field names used by common wallet backends
+            "keypair", "secretkey", "signingkey", "signing_key",
+            "fullkeypair", "full_keypair", "encodedkey", "encoded_key",
         }
 
         if isinstance(response_json, dict):
