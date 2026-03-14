@@ -141,7 +141,7 @@ class APICrawler:
         """Probe a URL and return (status_code, content_type, response_size, body)."""
         try:
             time.sleep(self.delay + random.uniform(0, 0.1))
-            resp = self.session.request(method, url, timeout=8)
+            resp = self.session.request(method, url, timeout=(6, 8))
             ct = resp.headers.get("Content-Type", "")
             return resp.status_code, ct, len(resp.content), resp.text
         except requests.exceptions.RequestException as e:
@@ -351,7 +351,7 @@ class APICrawler:
                 gql_url,
                 data=introspection,
                 headers={"Content-Type": "application/json"},
-                timeout=8,
+                timeout=(6, 8),
             )
             if resp.status_code == 200 and "__schema" in resp.text:
                 info["notes"].append("GraphQL introspection enabled — full schema exposed")

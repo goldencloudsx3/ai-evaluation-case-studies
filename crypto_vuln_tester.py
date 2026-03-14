@@ -11,6 +11,7 @@ import argparse
 import time
 import threading
 import itertools
+import signal
 
 import requests
 from urllib3.exceptions import InsecureRequestWarning
@@ -258,6 +259,10 @@ def main():
     parser.add_argument("--yes", "-y", action="store_true",
                         help="Skip authorization confirmation")
     parser.add_argument("--verbose","-v", action="store_true")
+    parser.add_argument("--auto-retry", type=int, default=0, metavar="N",
+                        help="Auto-retry up to N times if the scan fails or hangs (default: 0)")
+    parser.add_argument("--retry-delay", type=float, default=30.0, metavar="SECS",
+                        help="Seconds to wait between retries (default: 30)")
     args = parser.parse_args()
 
     target = args.target.rstrip("/")
@@ -276,6 +281,29 @@ def main():
             sys.exit(1)
         print()
 
+    max_attempts = 1 + max(0, args.auto_retry)
+    last_exit_code = 0
+
+    for attempt in range(1, max_attempts + 1):
+        if attempt > 1:
+            print(f"\n{YEL}  ↻ Retry {attempt - 1}/{args.auto_retry} — waiting {args.retry_delay:.0f}s …{R}\n")
+            time.sleep(args.retry_delay)
+
+        last_exit_code = _run_scan(args, target)
+
+        if last_exit_code != 3:   # 3 = scan aborted / incomplete
+            break
+        if attempt == max_attempts:
+            print(f"\n{RED}  ✗ All {args.auto_retry} retries exhausted.{R}\n")
+
+    sys.exit(last_exit_code if last_exit_code != 3 else 1)
+
+
+def _run_scan(args, target) -> int:
+    """
+    Execute one full scan pass.
+    Returns:  0 = clean, 1 = findings, 2 = critical findings, 3 = scan incomplete/crashed.
+    """
     session  = build_session(args)
     reporter = Reporter(output_dir=args.output_dir)
 
@@ -283,7 +311,7 @@ def main():
     sys.stdout.write(f"  {'·'} Checking reachability ...")
     sys.stdout.flush()
     try:
-        resp = session.get(target, timeout=10)
+        resp = session.get(target, timeout=(6, 10))
         crypto_hint = any(
             kw in resp.text.lower()
             for kw in ("blockchain", "wallet", "crypto", "private key", "mnemonic")
@@ -293,7 +321,7 @@ def main():
         sys.stdout.flush()
     except requests.exceptions.RequestException as e:
         sys.stdout.write(f"\r  {RED}✗{R} Cannot reach target: {e}\n")
-        sys.exit(1)
+        return 3
 
     # ── 2. Endpoint discovery ─────────────────────────────────────────────────
     crawl_result = None
@@ -340,14 +368,54 @@ def main():
         return _orig_test(base_url, pattern, obj_id, baseline)
     scanner._test_endpoint = _tracked_test
 
-    t0          = time.time()
-    idor_result = scanner.scan(target, seed_id=args.seed_id)
-    elapsed     = time.time() - t0
+    # ── Signal handler: save partial results on SIGINT/SIGTERM ────────────────
+    _scan_interrupted = threading.Event()
+
+    def _handle_signal(signum, frame):
+        _scan_interrupted.set()
+        spinner.stop("Scan interrupted — saving partial results …")
+        # Save whatever findings exist so far
+        partial = scanner._partial_result if hasattr(scanner, "_partial_result") else None
+        if partial and (partial.findings or partial.endpoints_tested > 0):
+            _save_reports(args, reporter, target, partial, crawl_result, auth_info, partial=True)
+        sys.exit(1)
+
+    old_sigint  = signal.signal(signal.SIGINT,  _handle_signal)
+    old_sigterm = signal.signal(signal.SIGTERM, _handle_signal)
+
+    try:
+        t0          = time.time()
+        idor_result = scanner.scan(target, seed_id=args.seed_id)
+        elapsed     = time.time() - t0
+    except Exception as e:
+        spinner.stop(f"Scan error: {e}")
+        # Restore signals
+        signal.signal(signal.SIGINT,  old_sigint)
+        signal.signal(signal.SIGTERM, old_sigterm)
+        partial = getattr(scanner, "_partial_result", None)
+        if partial and (partial.findings or partial.endpoints_tested > 0):
+            print(f"\n  {YEL}[!]{R} Saving partial results from {partial.endpoints_tested} probes tested so far …")
+            _save_reports(args, reporter, target, partial, crawl_result, auth_info, partial=True)
+        return 3
+    finally:
+        signal.signal(signal.SIGINT,  old_sigint)
+        signal.signal(signal.SIGTERM, old_sigterm)
 
     spinner.stop(f"IDOR scan complete  ({elapsed:.1f}s)")
 
     # ── 4. Reports ────────────────────────────────────────────────────────────
-    sys.stdout.write(f"  {'·'} Saving reports ...")
+    report_files = _save_reports(args, reporter, target, idor_result, crawl_result, auth_info)
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+    print_summary(target, idor_result, crawl_result, auth_info, report_files)
+
+    n_crit = sum(1 for f in idor_result.findings if f.severity == "CRITICAL")
+    return 2 if n_crit else 1 if idor_result.findings else 0
+
+
+def _save_reports(args, reporter, target, idor_result, crawl_result, auth_info, partial=False):
+    tag = " (partial)" if partial else ""
+    sys.stdout.write(f"  {'·'} Saving reports{tag} ...")
     sys.stdout.flush()
     report_files = []
     if not args.no_json:
@@ -356,15 +424,9 @@ def main():
     if not args.no_html:
         p = reporter.save_html(target, idor_result, crawl_result, auth_info)
         report_files.append(("HTML", p))
-    sys.stdout.write(f"\r  {GRN}✓{R} Reports saved                              \n")
+    sys.stdout.write(f"\r  {GRN}✓{R} Reports saved{tag}                              \n")
     sys.stdout.flush()
-
-    # ── Summary ───────────────────────────────────────────────────────────────
-    print_summary(target, idor_result, crawl_result, auth_info, report_files)
-
-    # Exit code
-    n_crit = sum(1 for f in idor_result.findings if f.severity == "CRITICAL")
-    sys.exit(2 if n_crit else 1 if idor_result.findings else 0)
+    return report_files
 
 
 if __name__ == "__main__":

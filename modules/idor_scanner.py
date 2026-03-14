@@ -211,7 +211,7 @@ class IDORScanner:
             url = url_template.replace("{id}", canary)
             try:
                 time.sleep(self.delay * 0.5)
-                resp = self.session.get(url, timeout=8)
+                resp = self.session.get(url, timeout=(6, 8))
 
                 # If canary returns 200, this endpoint may not use IDs at all
                 # or always returns data — skip it for differential (still scan for keys)
@@ -276,7 +276,7 @@ class IDORScanner:
 
         try:
             time.sleep(self.delay + random.uniform(0, 0.15))
-            resp = self.session.get(url, timeout=10)
+            resp = self.session.get(url, timeout=(6, 10))
             content = resp.text
 
             # 1. Direct key material detection — always check regardless of status
@@ -351,7 +351,7 @@ class IDORScanner:
                     url,
                     data=query,
                     headers={"Content-Type": "application/json"},
-                    timeout=10,
+                    timeout=(6, 10),
                 )
                 if resp.status_code == 200:
                     keys = self.key_detector.detect(resp.text)
@@ -397,11 +397,13 @@ class IDORScanner:
                       sequential 1..max_ids is used.
         """
         result = IDORScanResult(target=base_url)
+        self._partial_result = result   # expose for signal handler / crash recovery
         ids = self._build_id_list(seed_id)
         result.ids_tested = len(ids)
 
         rest_patterns = [p for p in KEY_ENDPOINT_PATTERNS if p != "/graphql"]
-        result.endpoints_tested = len(rest_patterns) * len(ids)
+        total_combos = len(rest_patterns) * len(ids)
+        result.endpoints_tested = 0   # updated incrementally below
 
         for pattern in rest_patterns:
             # Calibrate baseline for this endpoint (no account needed)
@@ -413,8 +415,9 @@ class IDORScanner:
 
             for obj_id in ids:
                 finding = self._test_endpoint(base_url, pattern, obj_id, baseline)
-                if finding:
-                    with self._lock:
+                with self._lock:
+                    result.endpoints_tested += 1
+                    if finding:
                         result.findings.append(finding)
                         if finding.differential:
                             result.live_endpoints += 1
