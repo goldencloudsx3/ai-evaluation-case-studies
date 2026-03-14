@@ -23,29 +23,29 @@ from modules.crawler import APICrawler
 from modules.reporter import Reporter
 
 # ── ANSI colours ──────────────────────────────────────────────────────────────
-R  = "\033[0m"
+R    = "\033[0m"
 RED  = "\033[91m"
 YEL  = "\033[93m"
 BLU  = "\033[94m"
 GRN  = "\033[92m"
+CYAN = "\033[96m"
+MAG  = "\033[95m"
 DIM  = "\033[2m"
 BOLD = "\033[1m"
 
 SEV_COLOR = {"CRITICAL": RED, "HIGH": YEL, "MEDIUM": BLU, "LOW": GRN, "INFO": DIM}
 
-BANNER = f"""{BOLD}
-  Crypto Vulnerability Tester
-  IDOR / Key-Exposure Scanner for Blockchain Sites
-  For authorized security testing only{R}
-"""
+_BW = 52
+BANNER = (
+    f"\n{GRN}{BOLD}"
+    f"  ╔{'═'*_BW}╗\n"
+    f"  ║{'C R Y P T O   V U L N   T E S T E R':^{_BW}}║\n"
+    f"  ║{'─'*_BW}║\n"
+    f"  ║{'IDOR  ·  KEY-EXPOSURE  ·  BLOCKCHAIN':^{_BW}}║\n"
+    f"  ╚{'═'*_BW}╝{R}\n"
+    f"  {DIM}{'[ authorized security testing only ]':^{_BW+4}}{R}\n"
+)
 
-AUTH_NOTICE = f"""
-{YEL}┌─────────────────────────────────────────────────────┐
-│  You must have explicit written authorization from  │
-│  the target owner before scanning.  Unauthorized    │
-│  use is illegal (CFAA, CMA, and similar laws).      │
-└─────────────────────────────────────────────────────┘{R}
-"""
 
 
 # ── Spinner ───────────────────────────────────────────────────────────────────
@@ -65,11 +65,11 @@ class Spinner:
             self._count += 1
 
     def _spin(self):
-        frames = itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+        frames = itertools.cycle(["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"])
         while not self._stop.is_set():
             with self._lock:
                 n = self._count
-            sys.stdout.write(f"\r  {next(frames)} {self.label}  [{n} requests]   ")
+            sys.stdout.write(f"\r  {CYAN}{next(frames)}{R} {self.label}  {DIM}[{n:>5} req]{R}   ")
             sys.stdout.flush()
             time.sleep(0.1)
 
@@ -83,7 +83,7 @@ class Spinner:
         label = final_label or self.label
         with self._lock:
             n = self._count
-        sys.stdout.write(f"\r  {GRN}✓{R} {label}  [{n} requests]          \n")
+        sys.stdout.write(f"\r  {GRN}✔{R} {BOLD}{label}{R}  {DIM}[{n} req]{R}          \n")
         sys.stdout.flush()
 
 
@@ -95,9 +95,8 @@ def status(icon: str, msg: str, color: str = ""):
 
 def section(title: str):
     width = 62
-    print(f"\n{DIM}{'─' * width}{R}")
-    print(f"  {BOLD}{title}{R}")
-    print(f"{DIM}{'─' * width}{R}")
+    print(f"\n{CYAN}  ▸ {BOLD}{title}{R}")
+    print(f"{DIM}  {'╌'*width}{R}")
 
 
 def build_session(args) -> requests.Session:
@@ -138,8 +137,8 @@ def print_summary(target, idor_result, crawl_result, auth_info, report_files):
     W = 66
     bar = "═" * W
 
-    print(f"\n{BOLD}╔{bar}╗")
-    print(f"║{'FINDINGS SUMMARY':^{W}}║")
+    print(f"\n{GRN}{BOLD}╔{bar}╗")
+    print(f"║{'◈  SCAN COMPLETE  ·  FINDINGS SUMMARY  ◈':^{W}}║")
     print(f"╚{bar}╝{R}")
 
     # ── Scan stats ────────────────────────────────────────────────────────────
@@ -153,7 +152,7 @@ def print_summary(target, idor_result, crawl_result, auth_info, report_files):
     # ── Verdict ───────────────────────────────────────────────────────────────
     print()
     if n_total == 0:
-        print(f"  {GRN}{BOLD}VERDICT: CLEAN{R}  — No key exposure findings detected.")
+        print(f"  {GRN}{BOLD}▶ VERDICT ◀  ACCESS SECURE{R}  — No key exposure findings detected.")
         print(f"  {DIM}(A clean result does not guarantee the target is fully secure.){R}")
     else:
         verdict_color = RED if n_crit else YEL if n_high else BLU
@@ -162,7 +161,7 @@ def print_summary(target, idor_result, crawl_result, auth_info, report_files):
         if n_high: parts.append(f"{YEL}{n_high} high{R}")
         if n_med:  parts.append(f"{BLU}{n_med} medium{R}")
         if n_low:  parts.append(f"{GRN}{n_low} low/info{R}")
-        print(f"  {verdict_color}{BOLD}VERDICT: VULNERABLE{R}  ({', '.join(parts)})")
+        print(f"  {verdict_color}{BOLD}▶ VERDICT ◀  VULNERABLE{R}  ({', '.join(parts)})")
 
     # ── Per-finding detail ────────────────────────────────────────────────────
     if findings:
@@ -226,7 +225,7 @@ def print_summary(target, idor_result, crawl_result, auth_info, report_files):
         for label, path in report_files:
             print(f"    {label:5}  {path}")
 
-    print(f"\n{DIM}{'─' * (W + 2)}{R}\n")
+    print(f"\n{GRN}{DIM}{'═' * (W + 2)}{R}\n")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -273,11 +272,10 @@ def main():
 
     # Authorization gate
     if not args.yes:
-        print(AUTH_NOTICE)
         print(f"  Target: {BOLD}{target}{R}\n")
-        ans = input("  Confirm you have written authorization to test this target [yes/NO]: ").strip().lower()
+        ans = input(f"  {CYAN}▸{R} Confirm written authorization to test this target {DIM}[yes/NO]{R}: ").strip().lower()
         if ans not in ("yes", "y"):
-            print("\n  Aborted.\n")
+            print(f"\n  {RED}{BOLD}[ ABORTED ]{R}\n")
             sys.exit(1)
         print()
 
@@ -286,7 +284,7 @@ def main():
 
     for attempt in range(1, max_attempts + 1):
         if attempt > 1:
-            print(f"\n{YEL}  ↻ Retry {attempt - 1}/{args.auto_retry} — waiting {args.retry_delay:.0f}s …{R}\n")
+            print(f"\n{CYAN}  ↺ {BOLD}RETRY {attempt - 1}/{args.auto_retry}{R}{CYAN} — waiting {args.retry_delay:.0f}s …{R}\n")
             time.sleep(args.retry_delay)
 
         last_exit_code = _run_scan(args, target)
@@ -294,7 +292,7 @@ def main():
         if last_exit_code != 3:   # 3 = scan aborted / incomplete
             break
         if attempt == max_attempts:
-            print(f"\n{RED}  ✗ All {args.auto_retry} retries exhausted.{R}\n")
+            print(f"\n{RED}  ✘ {BOLD}ALL RETRIES EXHAUSTED{R}{RED}  ({args.auto_retry} attempts).{R}\n")
 
     sys.exit(last_exit_code if last_exit_code != 3 else 1)
 
@@ -308,7 +306,7 @@ def _run_scan(args, target) -> int:
     reporter = Reporter(output_dir=args.output_dir)
 
     # ── 1. Reachability ───────────────────────────────────────────────────────
-    sys.stdout.write(f"  {'·'} Checking reachability ...")
+    sys.stdout.write(f"  {DIM}◌{R} Checking reachability ...")
     sys.stdout.flush()
     try:
         resp = session.get(target, timeout=(6, 10))
@@ -316,11 +314,11 @@ def _run_scan(args, target) -> int:
             kw in resp.text.lower()
             for kw in ("blockchain", "wallet", "crypto", "private key", "mnemonic")
         )
-        hint_str = f"  {GRN}(crypto indicators found){R}" if crypto_hint else ""
-        sys.stdout.write(f"\r  {GRN}✓{R} Reachable  HTTP {resp.status_code}{hint_str}                  \n")
+        hint_str = f"  {CYAN}(crypto indicators found){R}" if crypto_hint else ""
+        sys.stdout.write(f"\r  {GRN}◉{R} {BOLD}REACHABLE{R}  HTTP {resp.status_code}{hint_str}                  \n")
         sys.stdout.flush()
     except requests.exceptions.RequestException as e:
-        sys.stdout.write(f"\r  {RED}✗{R} Cannot reach target: {e}\n")
+        sys.stdout.write(f"\r  {RED}✘{R} {BOLD}UNREACHABLE{R}  {e}\n")
         return 3
 
     # ── 2. Endpoint discovery ─────────────────────────────────────────────────
@@ -328,7 +326,7 @@ def _run_scan(args, target) -> int:
     auth_info    = {"scheme": "none", "notes": []}
 
     if not args.no_crawl:
-        sys.stdout.write(f"  {'·'} Discovering endpoints ...")
+        sys.stdout.write(f"  {DIM}◌{R} Discovering endpoints ...")
         sys.stdout.flush()
         crawler = APICrawler(session=session, delay=args.delay * 0.6, max_pages=30)
         auth_info    = crawler.detect_auth_scheme(target)
@@ -337,10 +335,10 @@ def _run_scan(args, target) -> int:
         crawl_result.endpoints.extend(wordlist_hits)
         key_ep_count = len([e for e in crawl_result.endpoints if e.key_related])
         sys.stdout.write(
-            f"\r  {GRN}✓{R} Endpoints  "
-            f"{crawl_result.pages_crawled} pages | "
-            f"{len(crawl_result.endpoints)} endpoints found | "
-            f"{key_ep_count} key-related"
+            f"\r  {GRN}◉{R} {BOLD}ENDPOINTS{R}  "
+            f"{crawl_result.pages_crawled} pages · "
+            f"{len(crawl_result.endpoints)} found · "
+            f"{CYAN}{key_ep_count} key-related{R}"
             f"                        \n"
         )
         sys.stdout.flush()
@@ -415,7 +413,7 @@ def _run_scan(args, target) -> int:
 
 def _save_reports(args, reporter, target, idor_result, crawl_result, auth_info, partial=False):
     tag = " (partial)" if partial else ""
-    sys.stdout.write(f"  {'·'} Saving reports{tag} ...")
+    sys.stdout.write(f"  {DIM}◌{R} Saving reports{tag} ...")
     sys.stdout.flush()
     report_files = []
     if not args.no_json:
@@ -424,7 +422,7 @@ def _save_reports(args, reporter, target, idor_result, crawl_result, auth_info, 
     if not args.no_html:
         p = reporter.save_html(target, idor_result, crawl_result, auth_info)
         report_files.append(("HTML", p))
-    sys.stdout.write(f"\r  {GRN}✓{R} Reports saved{tag}                              \n")
+    sys.stdout.write(f"\r  {GRN}◉{R} {BOLD}REPORTS SAVED{R}{tag}                              \n")
     sys.stdout.flush()
     return report_files
 
