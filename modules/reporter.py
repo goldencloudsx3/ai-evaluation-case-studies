@@ -10,7 +10,6 @@ FOR AUTHORIZED SECURITY TESTING ONLY.
 import json
 import datetime
 from pathlib import Path
-from dataclasses import asdict
 
 
 SEVERITY_COLORS = {

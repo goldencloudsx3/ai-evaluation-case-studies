@@ -398,8 +398,8 @@ class IDORScanner:
                 if finding:
                     with self._lock:
                         result.findings.append(finding)
-                    if finding.differential:
-                        result.live_endpoints += 1
+                        if finding.differential:
+                            result.live_endpoints += 1
 
         # GraphQL (limited set of IDs to keep noise low)
         for obj_id in ids[:8]:

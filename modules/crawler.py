@@ -14,7 +14,7 @@ import re
 import time
 import random
 from dataclasses import dataclass, field
-from urllib.parse import urljoin, urlparse, urlencode
+from urllib.parse import urljoin, urlparse
 from typing import Optional
 
 import requests
@@ -152,7 +152,7 @@ class APICrawler:
         """Extract all links from an HTML page."""
         links = []
         try:
-            soup = BeautifulSoup(html, "lxml")
+            soup = BeautifulSoup(html, "html.parser")
             base_domain = urlparse(base_url).netloc
 
             for tag in soup.find_all(["a", "link", "script", "form"]):
@@ -183,7 +183,7 @@ class APICrawler:
         """Find and analyze JavaScript files for embedded API routes."""
         discovered = []
         try:
-            soup = BeautifulSoup(html, "lxml")
+            soup = BeautifulSoup(html, "html.parser")
             base_domain = urlparse(base_url).netloc
 
             for script in soup.find_all("script", src=True):
@@ -326,7 +326,7 @@ class APICrawler:
         for path in login_paths:
             url = urljoin(base_url, path)
             status, ct, size, body = self._probe(url, "GET")
-            if status and status not in (404, 410):
+            if status is not None and status not in (404, 410):
                 info["login_endpoint"] = url
                 # Check response for token hints
                 if body:

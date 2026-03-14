@@ -17,8 +17,6 @@ FOR AUTHORIZED SECURITY TESTING ONLY.
 """
 
 import re
-import json
-from dataclasses import dataclass
 from typing import Optional
 
 # BIP39 wordlist subset for mnemonic detection (common words)
@@ -92,7 +90,7 @@ PATTERNS = {
     ),
     # Raw 64-char hex private key (no label) — lower confidence
     "raw_hex_64": re.compile(
-        r'(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])',
+        r'(?<![0-9a-fA-F])[0-9a-fA-F]{64}(?![0-9a-fA-F])',
     ),
     # Bitcoin WIF: starts with 5 (uncompressed), K or L (compressed), or c (testnet)
     "wif_key": re.compile(
@@ -165,17 +163,10 @@ TYPE_NAMES = {
 }
 
 
-@dataclass
-class KeyMatch:
-    pattern_type: str
-    type_name: str
-    severity: str
-    match: str
-    redacted: str  # Safe version for reporting
-
-
 def _redact(value: str, keep_chars: int = 8) -> str:
     """Redact a sensitive value, keeping only the first N and last N chars."""
+    if not value:
+        return "***REDACTED***"
     if len(value) <= keep_chars * 2:
         return "***REDACTED***"
     return f"{value[:keep_chars]}...{value[-keep_chars:]}***REDACTED***"

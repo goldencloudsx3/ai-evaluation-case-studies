@@ -77,7 +77,8 @@ class Spinner:
 
     def stop(self, final_label: str = ""):
         self._stop.set()
-        self._thread.join()
+        if self._thread.is_alive():
+            self._thread.join()
         label = final_label or self.label
         with self._lock:
             n = self._count
@@ -177,7 +178,7 @@ def print_summary(target, idor_result, crawl_result, auth_info, report_files):
                 tag = f"[{sev}]"
                 # Title line
                 if f.keys_found:
-                    kind = f.keys_found[0]["type_name"]
+                    kind = f.keys_found[0].get("type_name", "Unknown key type")
                     title = f"Key exposed — {kind}"
                 elif f.differential:
                     title = "IDOR candidate — response deviates from baseline"
@@ -191,7 +192,7 @@ def print_summary(target, idor_result, crawl_result, auth_info, report_files):
 
                 if f.keys_found:
                     for k in f.keys_found:
-                        print(f"         Key type : {k['type_name']}  →  {k['redacted']}")
+                        print(f"         Key type : {k.get('type_name','?')}  →  {k.get('redacted','REDACTED')}")
 
                 # Fix hint
                 if sev == "CRITICAL" and f.keys_found:
