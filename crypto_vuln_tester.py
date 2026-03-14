@@ -1,95 +1,106 @@
 #!/usr/bin/env python3
 """
 Crypto Vulnerability Tester
-============================
-Tests blockchain/crypto websites for IDOR vulnerabilities that expose
-private and public cryptographic keys — the exact vulnerability class
-described in:
-
-  "How I was able to access any public/private keys in a blockchain website"
-  https://infosecwriteups.com/how-i-was-able-to-access-any-public-private-keys-in-a-blockchain-website-ae0346da91bb
-
-VULNERABILITY CLASS:
-  IDOR (Insecure Direct Object Reference) on wallet/key management API
-  endpoints. No account registration required — uses differential/baseline
-  analysis to detect IDOR without any prior knowledge of valid IDs.
-
-HOW IT WORKS (no account needed):
-  1. For each endpoint pattern, probe with a known-invalid canary ID to
-     learn what "not found" looks like for that endpoint.
-  2. Enumerate sequential IDs (1..N) and compare each response against
-     the "not found" baseline — deviations indicate a real object was hit.
-  3. Scan every response body for cryptographic key material directly.
-
-USAGE:
-  python crypto_vuln_tester.py --target https://example.com [OPTIONS]
-
-  --target      Target base URL (REQUIRED — must have written authorization)
-  --id          Optional anchor ID (e.g. seen on a public profile page)
-  --token       Optional Bearer token or API key (for auth-protected endpoints)
-  --cookie      Optional session cookie string (name=value)
-  --max-ids     Number of IDs to enumerate (default: 30)
-  --delay       Delay between requests in seconds (default: 0.5)
-  --no-crawl    Skip site crawling, only test known API patterns
-  --output-dir  Directory to save reports (default: ./reports)
-  --verbose     Verbose output
-  --no-html     Skip HTML report generation
-  --no-json     Skip JSON report generation
+Usage:  python crypto_vuln_tester.py --target https://example.com
 
 FOR AUTHORIZED SECURITY TESTING ONLY.
-Unauthorized use against systems you do not own or have explicit
-written permission to test is illegal.
 """
 
 import sys
 import argparse
 import time
-import datetime
+import threading
+import itertools
 
 import requests
 from urllib3.exceptions import InsecureRequestWarning
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-from modules.idor_scanner import IDORScanner, IDORScanResult
+from modules.idor_scanner import IDORScanner, KEY_ENDPOINT_PATTERNS
 from modules.crawler import APICrawler
 from modules.reporter import Reporter
 
+# ── ANSI colours ──────────────────────────────────────────────────────────────
+R  = "\033[0m"
+RED  = "\033[91m"
+YEL  = "\033[93m"
+BLU  = "\033[94m"
+GRN  = "\033[92m"
+DIM  = "\033[2m"
+BOLD = "\033[1m"
 
-BANNER = r"""
-  ____                  _          __     __    _ _____         _
- / ___|_ __ _   _ _ __ | |_ ___   \ \   / /_ _| |_   _|__  ___| |_ ___ _ __
-| |   | '__| | | | '_ \| __/ _ \   \ \ / / _` | | | |/ _ \/ __| __/ _ \ '__|
-| |___| |  | |_| | |_) | || (_) |   \ V / (_| | | | |  __/\__ \ ||  __/ |
- \____|_|   \__, | .__/ \__\___/     \_/ \__,_|_| |_|\___||___/\__\___|_|
-            |___/|_|
+SEV_COLOR = {"CRITICAL": RED, "HIGH": YEL, "MEDIUM": BLU, "LOW": GRN, "INFO": DIM}
 
-  Blockchain / Crypto Key Exposure & IDOR Scanner
-  For authorized security testing only
+BANNER = f"""{BOLD}
+  Crypto Vulnerability Tester
+  IDOR / Key-Exposure Scanner for Blockchain Sites
+  For authorized security testing only{R}
 """
 
-AUTHORIZATION_DISCLAIMER = """
-╔══════════════════════════════════════════════════════════════════════╗
-║                    ⚠  AUTHORIZATION REQUIRED  ⚠                     ║
-║                                                                      ║
-║  This tool tests for vulnerabilities in web applications.            ║
-║  You MUST have explicit written authorization from the target        ║
-║  system owner before running this tool.                              ║
-║                                                                      ║
-║  Unauthorized use is illegal under the Computer Fraud and Abuse      ║
-║  Act (CFAA), Computer Misuse Act, and similar laws worldwide.        ║
-║                                                                      ║
-║  By proceeding you confirm you have written authorization.           ║
-╚══════════════════════════════════════════════════════════════════════╝
+AUTH_NOTICE = f"""
+{YEL}┌─────────────────────────────────────────────────────┐
+│  You must have explicit written authorization from  │
+│  the target owner before scanning.  Unauthorized    │
+│  use is illegal (CFAA, CMA, and similar laws).      │
+└─────────────────────────────────────────────────────┘{R}
 """
+
+
+# ── Spinner ───────────────────────────────────────────────────────────────────
+
+class Spinner:
+    """Thread-safe terminal spinner with live counter."""
+
+    def __init__(self, label: str):
+        self.label   = label
+        self._stop   = threading.Event()
+        self._count  = 0
+        self._lock   = threading.Lock()
+        self._thread = threading.Thread(target=self._spin, daemon=True)
+
+    def increment(self):
+        with self._lock:
+            self._count += 1
+
+    def _spin(self):
+        frames = itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+        while not self._stop.is_set():
+            with self._lock:
+                n = self._count
+            sys.stdout.write(f"\r  {next(frames)} {self.label}  [{n} requests]   ")
+            sys.stdout.flush()
+            time.sleep(0.1)
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self, final_label: str = ""):
+        self._stop.set()
+        self._thread.join()
+        label = final_label or self.label
+        with self._lock:
+            n = self._count
+        sys.stdout.write(f"\r  {GRN}✓{R} {label}  [{n} requests]          \n")
+        sys.stdout.flush()
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def status(icon: str, msg: str, color: str = ""):
+    print(f"  {color}{icon}{R}  {msg}")
+
+
+def section(title: str):
+    width = 62
+    print(f"\n{DIM}{'─' * width}{R}")
+    print(f"  {BOLD}{title}{R}")
+    print(f"{DIM}{'─' * width}{R}")
 
 
 def build_session(args) -> requests.Session:
-    """Build a configured requests.Session from CLI auth arguments."""
-    session = requests.Session()
-
-    # Default headers — look like a browser to avoid trivial bot detection
-    session.headers.update({
+    s = requests.Session()
+    s.headers.update({
         "User-Agent": (
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -97,234 +108,262 @@ def build_session(args) -> requests.Session:
         "Accept": "application/json, text/html, */*",
         "Accept-Language": "en-US,en;q=0.9",
     })
-
-    # Bearer token / API key
     if args.token:
-        if args.token.startswith("Bearer "):
-            session.headers["Authorization"] = args.token
-        else:
-            session.headers["Authorization"] = f"Bearer {args.token}"
-
-    # Cookie-based session
+        s.headers["Authorization"] = (
+            args.token if args.token.startswith("Bearer ") else f"Bearer {args.token}"
+        )
     if args.cookie:
         for pair in args.cookie.split(";"):
             pair = pair.strip()
             if "=" in pair:
                 name, _, value = pair.partition("=")
-                session.cookies.set(name.strip(), value.strip())
-
-    # Disable SSL verification if requested (for testing environments)
-    session.verify = not args.no_verify
-
-    return session
+                s.cookies.set(name.strip(), value.strip())
+    s.verify = not args.no_verify
+    return s
 
 
-def confirm_authorization(target: str) -> bool:
-    """Prompt the user to confirm they have authorization to test the target."""
-    print(AUTHORIZATION_DISCLAIMER)
-    print(f"  Target: {target}\n")
-    response = input(
-        "  Do you have explicit written authorization to test this target? [yes/NO]: "
-    ).strip().lower()
-    return response in ("yes", "y")
+# ── Summary box ───────────────────────────────────────────────────────────────
+
+def print_summary(target, idor_result, crawl_result, auth_info, report_files):
+    """Print the final nutshell findings box."""
+    findings  = idor_result.findings
+    n_crit    = sum(1 for f in findings if f.severity == "CRITICAL")
+    n_high    = sum(1 for f in findings if f.severity == "HIGH")
+    n_med     = sum(1 for f in findings if f.severity == "MEDIUM")
+    n_low     = sum(1 for f in findings if f.severity in ("LOW", "INFO"))
+    n_total   = len(findings)
+
+    W = 66
+    bar = "═" * W
+
+    print(f"\n{BOLD}╔{bar}╗")
+    print(f"║{'FINDINGS SUMMARY':^{W}}║")
+    print(f"╚{bar}╝{R}")
+
+    # ── Scan stats ────────────────────────────────────────────────────────────
+    pages = getattr(crawl_result, "pages_crawled", 0) if crawl_result else 0
+    eps   = getattr(crawl_result, "endpoints", []) if crawl_result else []
+    print(f"\n  Target   : {BOLD}{target}{R}")
+    print(f"  Auth     : {auth_info.get('scheme', 'none detected')}")
+    print(f"  Scanned  : {idor_result.endpoints_tested} endpoint×ID combos"
+          f"  |  {pages} pages crawled  |  {len(eps)} API endpoints found")
+
+    # ── Verdict ───────────────────────────────────────────────────────────────
+    print()
+    if n_total == 0:
+        print(f"  {GRN}{BOLD}VERDICT: CLEAN{R}  — No key exposure findings detected.")
+        print(f"  {DIM}(A clean result does not guarantee the target is fully secure.){R}")
+    else:
+        verdict_color = RED if n_crit else YEL if n_high else BLU
+        parts = []
+        if n_crit: parts.append(f"{RED}{n_crit} critical{R}")
+        if n_high: parts.append(f"{YEL}{n_high} high{R}")
+        if n_med:  parts.append(f"{BLU}{n_med} medium{R}")
+        if n_low:  parts.append(f"{GRN}{n_low} low/info{R}")
+        print(f"  {verdict_color}{BOLD}VERDICT: VULNERABLE{R}  ({', '.join(parts)})")
+
+    # ── Per-finding detail ────────────────────────────────────────────────────
+    if findings:
+        print(f"\n  {BOLD}Findings:{R}")
+        grouped = {}
+        for f in findings:
+            grouped.setdefault(f.severity, []).append(f)
+
+        for sev in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):
+            if sev not in grouped:
+                continue
+            col = SEV_COLOR.get(sev, "")
+            for f in grouped[sev]:
+                tag = f"[{sev}]"
+                # Title line
+                if f.keys_found:
+                    kind = f.keys_found[0]["type_name"]
+                    title = f"Key exposed — {kind}"
+                elif f.differential:
+                    title = "IDOR candidate — response deviates from baseline"
+                else:
+                    title = "Crypto fields in response — review for key exposure"
+
+                print(f"\n  {col}{BOLD}{tag}{R}  {title}")
+                print(f"         URL      : {f.endpoint}")
+                print(f"         ID tried : {f.reference_id}")
+                print(f"         Evidence : {f.evidence}")
+
+                if f.keys_found:
+                    for k in f.keys_found:
+                        print(f"         Key type : {k['type_name']}  →  {k['redacted']}")
+
+                # Fix hint
+                if sev == "CRITICAL" and f.keys_found:
+                    print(f"         {YEL}Fix      : Never return raw key material in API responses.{R}")
+                    print(f"                    Add ownership check: verify requesting user owns this resource.")
+                elif f.differential:
+                    print(f"         {YEL}Fix      : Add object-level authorization on this endpoint.{R}")
+                elif sev == "MEDIUM":
+                    print(f"         {YEL}Fix      : Audit this endpoint — crypto fields returned without auth check.{R}")
+
+    # ── Discovered key-related endpoints ─────────────────────────────────────
+    if crawl_result:
+        key_eps = [e for e in crawl_result.endpoints if e.key_related]
+        if key_eps:
+            print(f"\n  {BOLD}Key-related endpoints (manual review recommended):{R}")
+            for ep in key_eps[:12]:          # cap display at 12
+                auth_tag = f"  {YEL}[AUTH REQUIRED]{R}" if ep.auth_required else ""
+                ok_col   = GRN if ep.status_code == 200 else DIM
+                print(f"    {ok_col}HTTP {ep.status_code}{R}  {ep.url}{auth_tag}")
+            if len(key_eps) > 12:
+                print(f"    {DIM}… and {len(key_eps)-12} more — see report{R}")
+
+    # ── GraphQL note ──────────────────────────────────────────────────────────
+    for note in auth_info.get("notes", []):
+        print(f"\n  {YEL}[!]{R} {note}")
+
+    # ── Report files ─────────────────────────────────────────────────────────
+    if report_files:
+        print(f"\n  {BOLD}Reports saved:{R}")
+        for label, path in report_files:
+            print(f"    {label:5}  {path}")
+
+    print(f"\n{DIM}{'─' * (W + 2)}{R}\n")
 
 
-def print_phase(name: str):
-    """Print a phase header."""
-    print(f"\n{'─'*60}")
-    print(f"  PHASE: {name}")
-    print(f"{'─'*60}\n")
-
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
         description="Crypto Vulnerability Tester — IDOR & Key Exposure Scanner",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__,
     )
-    parser.add_argument(
-        "--target", required=True,
-        help="Target base URL (e.g. https://example.com)",
-    )
-    parser.add_argument(
-        "--id", dest="seed_id", type=int, default=None,
-        help="Optional anchor ID seen on a public page (no account needed)",
-    )
-    parser.add_argument(
-        "--token", default=None,
-        help="Bearer token or API key for authenticated requests",
-    )
-    parser.add_argument(
-        "--cookie", default=None,
-        help="Session cookie string (e.g. 'session=abc123; token=xyz')",
-    )
-    parser.add_argument(
-        "--max-ids", type=int, default=30,
-        help="Number of IDs to enumerate (default: 30)",
-    )
-    parser.add_argument(
-        "--delay", type=float, default=0.5,
-        help="Delay between requests in seconds (default: 0.5)",
-    )
-    parser.add_argument(
-        "--no-crawl", action="store_true",
-        help="Skip site crawling",
-    )
-    parser.add_argument(
-        "--output-dir", default="reports",
-        help="Directory to save reports (default: ./reports)",
-    )
-    parser.add_argument(
-        "--no-html", action="store_true",
-        help="Skip HTML report generation",
-    )
-    parser.add_argument(
-        "--no-json", action="store_true",
-        help="Skip JSON report generation",
-    )
-    parser.add_argument(
-        "--no-verify", action="store_true",
-        help="Disable SSL certificate verification",
-    )
-    parser.add_argument(
-        "--yes", "-y", action="store_true",
-        help="Skip authorization confirmation prompt",
-    )
-    parser.add_argument(
-        "--verbose", "-v", action="store_true",
-        help="Verbose output",
-    )
-
+    parser.add_argument("--target",    required=True,
+                        help="Target base URL  e.g. https://example.com")
+    parser.add_argument("--id",        dest="seed_id", type=int, default=None,
+                        help="Optional anchor ID seen on a public page")
+    parser.add_argument("--token",     default=None,
+                        help="Optional Bearer token / API key")
+    parser.add_argument("--cookie",    default=None,
+                        help="Optional session cookie  e.g. 'session=abc123'")
+    parser.add_argument("--max-ids",   type=int, default=30,
+                        help="IDs to enumerate per endpoint (default 30)")
+    parser.add_argument("--delay",     type=float, default=0.3,
+                        help="Seconds between requests (default 0.3)")
+    parser.add_argument("--no-crawl",  action="store_true",
+                        help="Skip crawling — test patterns only")
+    parser.add_argument("--output-dir",default="reports",
+                        help="Report output directory (default ./reports)")
+    parser.add_argument("--no-html",   action="store_true")
+    parser.add_argument("--no-json",   action="store_true")
+    parser.add_argument("--no-verify", action="store_true",
+                        help="Disable SSL verification")
+    parser.add_argument("--yes", "-y", action="store_true",
+                        help="Skip authorization confirmation")
+    parser.add_argument("--verbose","-v", action="store_true")
     args = parser.parse_args()
 
-    # Normalize target URL
     target = args.target.rstrip("/")
     if not target.startswith(("http://", "https://")):
         target = "https://" + target
 
     print(BANNER)
 
-    # Authorization check
+    # Authorization gate
     if not args.yes:
-        if not confirm_authorization(target):
-            print("\n  Aborted. Obtain written authorization before testing.\n")
+        print(AUTH_NOTICE)
+        print(f"  Target: {BOLD}{target}{R}\n")
+        ans = input("  Confirm you have written authorization to test this target [yes/NO]: ").strip().lower()
+        if ans not in ("yes", "y"):
+            print("\n  Aborted.\n")
             sys.exit(1)
+        print()
 
-    session = build_session(args)
+    session  = build_session(args)
     reporter = Reporter(output_dir=args.output_dir)
 
-    # ──────────────────────────────────────────────────────────
-    # PHASE 1: Reachability check
-    # ──────────────────────────────────────────────────────────
-    print_phase("1/4 — Reachability Check")
+    # ── 1. Reachability ───────────────────────────────────────────────────────
+    sys.stdout.write(f"  {'·'} Checking reachability ...")
+    sys.stdout.flush()
     try:
         resp = session.get(target, timeout=10)
-        print(f"  [+] Target reachable: HTTP {resp.status_code}")
-        if "blockchain" in resp.text.lower() or "wallet" in resp.text.lower() or "crypto" in resp.text.lower():
-            print("  [+] Crypto/blockchain indicators found in homepage")
+        crypto_hint = any(
+            kw in resp.text.lower()
+            for kw in ("blockchain", "wallet", "crypto", "private key", "mnemonic")
+        )
+        hint_str = f"  {GRN}(crypto indicators found){R}" if crypto_hint else ""
+        sys.stdout.write(f"\r  {GRN}✓{R} Reachable  HTTP {resp.status_code}{hint_str}                  \n")
+        sys.stdout.flush()
     except requests.exceptions.RequestException as e:
-        print(f"  [!] Cannot reach target: {e}")
+        sys.stdout.write(f"\r  {RED}✗{R} Cannot reach target: {e}\n")
         sys.exit(1)
 
-    # ──────────────────────────────────────────────────────────
-    # PHASE 2: Crawl & Endpoint Discovery
-    # ──────────────────────────────────────────────────────────
+    # ── 2. Endpoint discovery ─────────────────────────────────────────────────
     crawl_result = None
-    auth_info = {"scheme": "unknown", "notes": []}
+    auth_info    = {"scheme": "none", "notes": []}
 
     if not args.no_crawl:
-        print_phase("2/4 — Endpoint Discovery & Crawling")
-        crawler = APICrawler(
-            session=session,
-            delay=args.delay,
-            max_pages=30,
-            verbose=args.verbose,
-        )
-
-        print("  [*] Detecting authentication scheme...")
-        auth_info = crawler.detect_auth_scheme(target)
-        print(f"  [+] Auth scheme: {auth_info['scheme']}")
-        for note in auth_info.get("notes", []):
-            print(f"  [!] {note}")
-
-        print("  [*] Crawling site for API endpoints...")
+        sys.stdout.write(f"  {'·'} Discovering endpoints ...")
+        sys.stdout.flush()
+        crawler = APICrawler(session=session, delay=args.delay * 0.6, max_pages=30)
+        auth_info    = crawler.detect_auth_scheme(target)
         crawl_result = crawler.crawl(target)
-        print(f"  [+] Crawled {crawl_result.pages_crawled} pages, "
-              f"analyzed {crawl_result.js_files_analyzed} JS files")
-
-        print("  [*] Fuzzing common crypto API paths...")
         wordlist_hits = crawler.wordlist_fuzz(target)
         crawl_result.endpoints.extend(wordlist_hits)
-        print(f"  [+] Wordlist: {len(wordlist_hits)} responsive endpoints found")
-
-        reporter.print_discovered_endpoints(crawl_result)
+        key_ep_count = len([e for e in crawl_result.endpoints if e.key_related])
+        sys.stdout.write(
+            f"\r  {GRN}✓{R} Endpoints  "
+            f"{crawl_result.pages_crawled} pages | "
+            f"{len(crawl_result.endpoints)} endpoints found | "
+            f"{key_ep_count} key-related"
+            f"                        \n"
+        )
+        sys.stdout.flush()
+        if auth_info.get("scheme") != "none":
+            status("·", f"Auth scheme detected: {auth_info['scheme']}", DIM)
     else:
-        print_phase("2/4 — Endpoint Discovery [SKIPPED]")
+        status("·", "Endpoint discovery skipped (--no-crawl)", DIM)
 
-    # ──────────────────────────────────────────────────────────
-    # PHASE 3: IDOR Scan
-    # ──────────────────────────────────────────────────────────
-    print_phase("3/4 — IDOR Key Exposure Scan")
-
-    print("  [*] Mode: differential baseline analysis (no account required)")
-    if args.seed_id:
-        print(f"  [*] Anchor ID {args.seed_id} provided — enumerating neighbors")
-    else:
-        print("  [*] No anchor ID — enumerating sequential IDs 1..N")
-        print("  [!] TIP: If you spot a numeric ID on a public page (profile, tx, etc.)")
-        print("           pass it with --id N to enumerate around a real user range")
-
-    print(f"  [*] Enumerating up to {args.max_ids} IDs per endpoint pattern")
-    print(f"  [*] Testing {len([p for p in __import__('modules.idor_scanner', fromlist=['KEY_ENDPOINT_PATTERNS']).KEY_ENDPOINT_PATTERNS])} endpoint patterns\n")
-
-    scanner = IDORScanner(
+    # ── 3. IDOR scan ──────────────────────────────────────────────────────────
+    n_patterns = len([p for p in KEY_ENDPOINT_PATTERNS if p != "/graphql"])
+    scanner    = IDORScanner(
         session=session,
         delay=args.delay,
         max_ids=args.max_ids,
         verbose=args.verbose,
     )
 
-    start_time = time.time()
+    spinner = Spinner(f"Scanning {n_patterns} endpoint patterns × {args.max_ids} IDs")
+    spinner.start()
+
+    # Patch scanner to tick the spinner on each request
+    _orig_test = scanner._test_endpoint
+    def _tracked_test(base_url, pattern, obj_id, baseline):
+        spinner.increment()
+        return _orig_test(base_url, pattern, obj_id, baseline)
+    scanner._test_endpoint = _tracked_test
+
+    t0          = time.time()
     idor_result = scanner.scan(target, seed_id=args.seed_id)
-    elapsed = time.time() - start_time
+    elapsed     = time.time() - t0
 
-    print(f"  [+] Scan complete in {elapsed:.1f}s")
-    print(f"  [+] Tested {idor_result.endpoints_tested} endpoint+ID combinations")
-    print(f"  [+] Live IDOR candidates (differential): {idor_result.live_endpoints}")
-    print(f"  [+] Total findings: {len(idor_result.findings)}")
+    spinner.stop(f"IDOR scan complete  ({elapsed:.1f}s)")
 
-    # ──────────────────────────────────────────────────────────
-    # PHASE 4: Reporting
-    # ──────────────────────────────────────────────────────────
-    print_phase("4/4 — Report Generation")
-
-    reporter.print_console_summary(target, idor_result, crawl_result, auth_info)
-
-    saved_files = []
-
+    # ── 4. Reports ────────────────────────────────────────────────────────────
+    sys.stdout.write(f"  {'·'} Saving reports ...")
+    sys.stdout.flush()
+    report_files = []
     if not args.no_json:
-        json_path = reporter.save_json(target, idor_result, crawl_result, auth_info)
-        saved_files.append(("JSON", json_path))
-        print(f"  [+] JSON report saved: {json_path}")
-
+        p = reporter.save_json(target, idor_result, crawl_result, auth_info)
+        report_files.append(("JSON", p))
     if not args.no_html:
-        html_path = reporter.save_html(target, idor_result, crawl_result, auth_info)
-        saved_files.append(("HTML", html_path))
-        print(f"  [+] HTML report saved: {html_path}")
+        p = reporter.save_html(target, idor_result, crawl_result, auth_info)
+        report_files.append(("HTML", p))
+    sys.stdout.write(f"\r  {GRN}✓{R} Reports saved                              \n")
+    sys.stdout.flush()
 
-    print()
+    # ── Summary ───────────────────────────────────────────────────────────────
+    print_summary(target, idor_result, crawl_result, auth_info, report_files)
 
-    # Exit code: non-zero if critical findings
-    critical_count = sum(1 for f in idor_result.findings if f.severity == "CRITICAL")
-    if critical_count > 0:
-        print(f"  ⚠  CRITICAL FINDINGS: {critical_count} — see report for details")
-        sys.exit(2)
-    elif idor_result.findings:
-        print(f"  !  {len(idor_result.findings)} non-critical findings — see report")
-        sys.exit(1)
-    else:
-        print("  ✓  No key exposure findings detected.")
-        sys.exit(0)
+    # Exit code
+    n_crit = sum(1 for f in idor_result.findings if f.severity == "CRITICAL")
+    sys.exit(2 if n_crit else 1 if idor_result.findings else 0)
 
 
 if __name__ == "__main__":
