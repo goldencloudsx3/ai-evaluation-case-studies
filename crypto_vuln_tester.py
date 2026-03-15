@@ -192,7 +192,20 @@ def print_summary(target, idor_result, crawl_result, auth_info, report_files):
 
                 if f.keys_found:
                     for k in f.keys_found:
-                        print(f"         Key type : {k.get('type_name','?')}  →  {k.get('redacted','REDACTED')}")
+                        fp_note = k.get("false_positive_note", "")
+                        validated = k.get("validated")
+                        val_tag = (
+                            f"  {GRN}[✔ CHECKSUM OK]{R}" if validated is True
+                            else f"  {YEL}[✘ CHECKSUM FAIL — likely false positive]{R}" if validated is False
+                            else ""
+                        )
+                        print(f"         Key type : {k.get('type_name','?')}  →  {k.get('redacted','REDACTED')}{val_tag}")
+                        if fp_note:
+                            print(f"         {YEL}Note     : {fp_note}{R}")
+
+                # False positive risk banner
+                if f.false_positive_risk:
+                    print(f"         {MAG}[FP RISK] : {f.false_positive_risk}{R}")
 
                 # Fix hint
                 if sev == "CRITICAL" and f.keys_found:

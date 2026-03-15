@@ -84,6 +84,30 @@ KEY_ENDPOINT_PATTERNS = [
 # IDs that should reliably return "not found" — used for baseline calibration
 CANARY_IDS = ["999999999", "00000000-dead-beef-0000-000000000000", "____invalid____"]
 
+# Response headers that indicate an anti-bot/CDN challenge layer was involved.
+# When these are present the page content is often JavaScript challenge code or
+# encoded tokens, NOT real API data — pattern-matched "keys" are false positives.
+_ANTIBOT_HEADERS = {
+    "cf-ray",           # Cloudflare edge
+    "cf-cache-status",  # Cloudflare cache
+    "cf-chl-tk",        # Cloudflare challenge token
+    "x-sucuri-id",      # Sucuri WAF
+    "x-fw-hash",        # Fastly shield
+    "x-amz-cf-id",      # AWS CloudFront (informational — lower confidence)
+}
+
+
+def _antibot_headers_present(headers: dict) -> list:
+    """
+    Return list of anti-bot header names found.
+    Also catches `Server: cloudflare` as an explicit Cloudflare signal.
+    """
+    lower = {k.lower(): v for k, v in headers.items()}
+    found = [h for h in _ANTIBOT_HEADERS if h in lower]
+    if lower.get("server", "").lower() == "cloudflare":
+        found.append("server: cloudflare")
+    return found
+
 GRAPHQL_QUERIES = [
     # Generic
     '{"query": "{ wallet(id: ID_PLACEHOLDER) { privateKey publicKey address } }"}',
@@ -117,6 +141,7 @@ class IDORFinding:
     severity: str
     evidence: str
     differential: bool = False   # True if found via baseline deviation, not direct key match
+    false_positive_risk: str = ""  # Set when anti-bot headers or other FP signals are detected
 
 
 @dataclass
@@ -279,6 +304,16 @@ class IDORScanner:
             resp = self.session.get(url, timeout=(6, 10))
             content = resp.text
 
+            # Check for anti-bot/CDN headers — findings from these responses
+            # are likely false positives (JS challenge code, encoded tokens).
+            antibot = _antibot_headers_present(dict(resp.headers))
+            fp_risk = (
+                f"Anti-bot headers detected ({', '.join(antibot)}) — "
+                "page content may be a JS challenge, not real API data. "
+                "Verify with: curl -i <url> to check raw response."
+                if antibot else ""
+            )
+
             # 1. Direct key material detection — always check regardless of status
             keys_found = self.key_detector.detect(content)
             if keys_found:
@@ -289,7 +324,20 @@ class IDORScanner:
                         "json_private_field", "json_wif", "mnemonic_wordlist",
                     )
                     for k in keys_found
+                    # Only count non-failed WIF validations as CRITICAL
+                    and not k.get("false_positive_note")
                 ) else "HIGH"
+
+                # If ALL key findings failed WIF validation AND anti-bot headers are
+                # present, downgrade severity — high confidence false positive.
+                all_fp = all(k.get("false_positive_note") for k in keys_found)
+                if all_fp and antibot:
+                    severity = "LOW"
+                    fp_risk = (
+                        f"HIGH CONFIDENCE FALSE POSITIVE — anti-bot headers present "
+                        f"({', '.join(antibot)}) AND all pattern matches failed WIF "
+                        "checksum validation. Pattern matched JS/encoded tokens, not real keys."
+                    )
 
                 return IDORFinding(
                     endpoint=url,
@@ -300,6 +348,7 @@ class IDORScanner:
                     severity=severity,
                     evidence=f"HTTP {resp.status_code} → {len(keys_found)} key pattern(s) detected",
                     differential=False,
+                    false_positive_risk=fp_risk,
                 )
 
             # 2. Differential analysis — response deviates from "not found" baseline
@@ -319,6 +368,7 @@ class IDORScanner:
                             f"— possible IDOR, review manually"
                         ),
                         differential=True,
+                        false_positive_risk=fp_risk,
                     )
 
             # 3. Crypto field heuristic on 200 responses (no baseline deviation needed)
@@ -332,6 +382,7 @@ class IDORScanner:
                     severity="MEDIUM",
                     evidence="HTTP 200 with multiple crypto-related fields — review for key exposure",
                     differential=False,
+                    false_positive_risk=fp_risk,
                 )
 
         except requests.exceptions.RequestException:

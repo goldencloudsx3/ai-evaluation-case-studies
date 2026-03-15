@@ -17,7 +17,61 @@ FOR AUTHORIZED SECURITY TESTING ONLY.
 """
 
 import re
+import hashlib
 from typing import Optional
+
+# Base58 alphabet (Bitcoin)
+_BASE58_ALPHA = b'123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+_BASE58_MAP   = {c: i for i, c in enumerate(_BASE58_ALPHA)}
+
+
+def _base58_decode(s: str) -> Optional[bytes]:
+    """Decode Base58 string to bytes. Returns None on invalid input."""
+    try:
+        n = 0
+        for ch in s:
+            digit = _BASE58_MAP.get(ord(ch))
+            if digit is None:
+                return None
+            n = n * 58 + digit
+        result = []
+        while n > 0:
+            result.append(n & 0xFF)
+            n >>= 8
+        for ch in s:
+            if ch == '1':
+                result.append(0)
+            else:
+                break
+        result.reverse()
+        return bytes(result)
+    except Exception:
+        return None
+
+
+def _validate_wif(wif: str) -> bool:
+    """
+    Validate a Bitcoin WIF private key via Base58Check.
+    Returns True only if the string is a structurally valid WIF key.
+    Redacted/truncated strings (containing '...') always return False.
+    """
+    if '...' in wif or len(wif) < 51:
+        return False
+    decoded = _base58_decode(wif)
+    if decoded is None or len(decoded) < 37:
+        return False
+    payload, checksum = decoded[:-4], decoded[-4:]
+    digest = hashlib.sha256(hashlib.sha256(payload).digest()).digest()
+    if digest[:4] != checksum:
+        return False
+    version = payload[0]
+    if version not in (0x80, 0xEF):          # mainnet / testnet
+        return False
+    if len(payload) not in (33, 34):         # 32-byte key + version [+ compression flag]
+        return False
+    if len(payload) == 34 and payload[-1] != 0x01:
+        return False
+    return True
 
 # BIP39 wordlist subset for mnemonic detection (common words)
 # Full list would be 2048 words; we use a representative subset for heuristics
@@ -216,6 +270,10 @@ class KeyDetector:
             for match in pattern.finditer(content):
                 matched_text = match.group(0)
 
+                # Skip redacted / truncated patterns — they are never real key material
+                if '...' in matched_text:
+                    continue
+
                 # Skip very short/common strings for low-signal patterns
                 if pattern_name == "raw_hex_64":
                     # Extra validation: skip if it looks like a txid or block hash
@@ -227,13 +285,36 @@ class KeyDetector:
                     continue
                 seen_matches.add(matched_text)
 
-                findings.append({
+                # WIF-specific: validate checksum before reporting
+                validated = None
+                if pattern_name in ("wif_key", "json_wif"):
+                    # Extract the raw Base58 token from the match
+                    wif_token_m = re.search(r'[5KLc][1-9A-HJ-NP-Za-km-z]{50,51}', matched_text)
+                    wif_token = wif_token_m.group(0) if wif_token_m else matched_text
+                    validated = _validate_wif(wif_token)
+                    if not validated:
+                        # Downgrade to LOW and mark as likely false positive
+                        findings.append({
+                            "type": pattern_name,
+                            "type_name": TYPE_NAMES[pattern_name],
+                            "severity": "LOW",
+                            "match": matched_text,
+                            "redacted": _redact(matched_text),
+                            "validated": False,
+                            "false_positive_note": "WIF Base58Check failed — likely JS token or encoding artifact",
+                        })
+                        continue
+
+                entry = {
                     "type": pattern_name,
                     "type_name": TYPE_NAMES[pattern_name],
                     "severity": SEVERITY_MAP[pattern_name],
                     "match": matched_text,
                     "redacted": _redact(matched_text),
-                })
+                }
+                if validated is not None:
+                    entry["validated"] = validated
+                findings.append(entry)
 
         # Mnemonic phrase detection via word list heuristic
         mnemonic_finding = self._detect_mnemonic_wordlist(content)
