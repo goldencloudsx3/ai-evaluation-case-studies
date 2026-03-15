@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
 *.pyo
+
+# Authorized targets list — keep off git
+authorized_targets.json
+authorized_targets.txt
