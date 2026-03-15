@@ -332,28 +332,46 @@ class KeyDetector:
 
     def _detect_mnemonic_wordlist(self, content: str) -> Optional[dict]:
         """
-        Use BIP39 word list heuristic to detect mnemonic phrases in plain text.
-        Looks for sequences of 12, 18, or 24 consecutive BIP39 words.
-        """
-        words = re.findall(r'\b[a-z]{3,8}\b', content.lower())
-        if len(words) < 12:
-            return None
+        Detect mnemonic phrases by looking for runs of consecutive space-separated
+        BIP39 words in the source text.
 
-        # Sliding window: check consecutive runs of BIP39 words
-        for window_size in (24, 18, 12):
-            for i in range(len(words) - window_size + 1):
-                window = words[i:i + window_size]
-                bip39_count = sum(1 for w in window if w in BIP39_SAMPLE_WORDS)
-                # If >80% of words are in our BIP39 sample, flag it
-                if bip39_count >= window_size * 0.8:
-                    phrase = " ".join(window)
-                    return {
-                        "type": "mnemonic_wordlist",
-                        "type_name": f"Likely BIP39 Mnemonic ({window_size} words)",
-                        "severity": "CRITICAL",
-                        "match": phrase,
-                        "redacted": _redact(phrase, 6),
-                    }
+        Words are only considered consecutive if they appear WITHOUT any structural
+        punctuation between them (colons, semicolons, braces, hyphens, angle
+        brackets, quotes, equals, slashes, digits, underscores).  This prevents
+        CSS property/value pairs and HTML attributes from being mistaken for mnemonics.
+
+        Example false positive this prevents:
+            border-color: black; background: blue; position: above;
+          → split on '-', ':', ';' → short segments, none reach 12 words.
+        """
+        text = content.lower()
+
+        # Split on any character that separates words in CSS/HTML/JS but would
+        # NOT appear in a space-separated mnemonic phrase.  Each resulting
+        # segment is a "clean run" where remaining words are only divided by
+        # whitespace — matching the format of an actual mnemonic phrase.
+        segments = re.split(r'[^\w\s]|[\d_]', text)
+
+        for segment in segments:
+            # Keep only plain lowercase alphabetic words 3–8 chars long
+            words = [w for w in segment.split() if w.isalpha() and 3 <= len(w) <= 8]
+            if len(words) < 12:
+                continue
+
+            for window_size in (24, 18, 12):
+                for i in range(len(words) - window_size + 1):
+                    window = words[i:i + window_size]
+                    bip39_count = sum(1 for w in window if w in BIP39_SAMPLE_WORDS)
+                    # >80% of the window must be BIP39 words
+                    if bip39_count >= window_size * 0.8:
+                        phrase = " ".join(window)
+                        return {
+                            "type": "mnemonic_wordlist",
+                            "type_name": f"Likely BIP39 Mnemonic ({window_size} words)",
+                            "severity": "CRITICAL",
+                            "match": phrase,
+                            "redacted": _redact(phrase, 6),
+                        }
         return None
 
     def detect_in_json(self, response_json: dict, path: str = "") -> list:
