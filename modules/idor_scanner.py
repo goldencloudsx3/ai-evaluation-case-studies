@@ -96,6 +96,31 @@ _ANTIBOT_HEADERS = {
     "x-amz-cf-id",      # AWS CloudFront (informational — lower confidence)
 }
 
+# Body markers that definitively identify a bot-challenge interstitial.
+# When any of these strings appear in a response body, the content is
+# challenge code/tokens — NOT real API data.  Key patterns found inside
+# challenge pages are always false positives.
+_CHALLENGE_BODY_MARKERS = (
+    b"cf_chl_opt",                        # Cloudflare managed/JS challenge
+    b"challenge-platform",                # Cloudflare challenge orchestrator
+    b"Enable JavaScript and cookies",     # Cloudflare noscript message
+    b"__cf_chl_",                         # Cloudflare challenge cookie/param
+    b"jschl_vc",                          # Cloudflare legacy IUAM challenge
+    b"sucuri_cloudproxy_js_challenge",    # Sucuri WAF challenge
+    b"_cf_chl_opt",                       # Cloudflare variation
+)
+
+
+def _is_challenge_page(resp: requests.Response) -> bool:
+    """
+    Return True if the response body is a bot-challenge interstitial
+    (Cloudflare, Sucuri, etc.) rather than real API content.
+
+    Checks the raw bytes to avoid encoding issues.
+    """
+    body = resp.content
+    return any(marker in body for marker in _CHALLENGE_BODY_MARKERS)
+
 
 def _antibot_headers_present(headers: dict) -> list:
     """
@@ -151,6 +176,7 @@ class IDORScanResult:
     endpoints_tested: int = 0
     ids_tested: int = 0
     live_endpoints: int = 0      # Endpoints that returned non-baseline responses
+    challenge_pages_skipped: int = 0   # Bot-challenge interstitials suppressed
     errors: list = field(default_factory=list)
 
 
@@ -303,6 +329,15 @@ class IDORScanner:
             time.sleep(self.delay + random.uniform(0, 0.15))
             resp = self.session.get(url, timeout=(6, 10))
             content = resp.text
+
+            # ── Bot-challenge detection ───────────────────────────────────────
+            # If the response is a Cloudflare/Sucuri challenge page the body
+            # contains long encoded token strings that trigger false positives
+            # in the key detector.  Suppress all findings and surface a note.
+            if _is_challenge_page(resp):
+                with self._lock:
+                    self._partial_result.challenge_pages_skipped += 1
+                return None   # challenge interstitial — not real API data
 
             # Check for anti-bot/CDN headers — findings from these responses
             # are likely false positives (JS challenge code, encoded tokens).

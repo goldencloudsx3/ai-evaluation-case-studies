@@ -169,8 +169,14 @@ def print_summary(
     eps   = getattr(crawl_result, "endpoints", []) if crawl_result else []
     print(f"\n  Target   : {BOLD}{target}{R}")
     print(f"  Auth     : {auth_info.get('scheme', 'none detected')}")
+    challenge_skipped = getattr(idor_result, "challenge_pages_skipped", 0)
+    challenge_note = (
+        f"  |  {YEL}{challenge_skipped} bot-challenge page(s) suppressed{R}"
+        if challenge_skipped else ""
+    )
     print(f"  Scanned  : {idor_result.endpoints_tested} endpoint×ID combos"
-          f"  |  {pages} pages crawled  |  {len(eps)} API endpoints found")
+          f"  |  {pages} pages crawled  |  {len(eps)} API endpoints found"
+          f"{challenge_note}")
 
     # ── Verdict ───────────────────────────────────────────────────────────────
     print()
