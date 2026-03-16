@@ -21,6 +21,9 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 from modules.idor_scanner import IDORScanner, KEY_ENDPOINT_PATTERNS
 from modules.crawler import APICrawler
 from modules.reporter import Reporter
+from modules.jwt_analyzer import JWTAnalyzer
+from modules.header_analyzer import HeaderAnalyzer
+from modules.token_analyzer import TokenAnalyzer
 
 # ── ANSI colours ──────────────────────────────────────────────────────────────
 R    = "\033[0m"
@@ -41,7 +44,7 @@ BANNER = (
     f"  ╔{'═'*_BW}╗\n"
     f"  ║{'C R Y P T O   V U L N   T E S T E R':^{_BW}}║\n"
     f"  ║{'─'*_BW}║\n"
-    f"  ║{'IDOR  ·  KEY-EXPOSURE  ·  BLOCKCHAIN':^{_BW}}║\n"
+    f"  ║{'IDOR · KEY-EXPOSURE · JWT · HEADERS · TOKENS':^{_BW}}║\n"
     f"  ╚{'═'*_BW}╝{R}\n"
     f"  {DIM}{'[ authorized security testing only ]':^{_BW+4}}{R}\n"
 )
@@ -123,9 +126,29 @@ def build_session(args) -> requests.Session:
     return s
 
 
+# ── Extra findings printer (headers / JWT / tokens) ───────────────────────────
+
+def _print_extra_findings(section_title: str, findings: list):
+    """Print a block of HeaderFinding / JWTFinding / TokenFinding objects."""
+    print(f"\n  {BOLD}{section_title}:{R}")
+    for sev in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):
+        group = [f for f in findings if f.severity == sev]
+        if not group:
+            continue
+        col = SEV_COLOR.get(sev, "")
+        for f in group:
+            print(f"\n  {col}{BOLD}[{sev}]{R}  {f.title}")
+            print(f"         {f.description}")
+            print(f"         {DIM}Evidence     :{R} {f.evidence}")
+            print(f"         {YEL}Recommendation:{R} {f.recommendation}")
+
+
 # ── Summary box ───────────────────────────────────────────────────────────────
 
-def print_summary(target, idor_result, crawl_result, auth_info, report_files):
+def print_summary(
+    target, idor_result, crawl_result, auth_info, report_files,
+    header_result=None, jwt_result=None, token_result=None,
+):
     """Print the final nutshell findings box."""
     findings  = idor_result.findings
     n_crit    = sum(1 for f in findings if f.severity == "CRITICAL")
@@ -296,6 +319,18 @@ def print_summary(target, idor_result, crawl_result, auth_info, report_files):
             print(f"  {prefix}{item}")
         print(f"\n  {DIM}If you can't check all these boxes — keep testing.{R}")
 
+    # ── Security header findings ──────────────────────────────────────────────
+    if header_result and header_result.findings:
+        _print_extra_findings("Security Header Findings", header_result.findings)
+
+    # ── JWT findings ──────────────────────────────────────────────────────────
+    if jwt_result and jwt_result.findings:
+        _print_extra_findings("JWT Vulnerability Findings", jwt_result.findings)
+
+    # ── Token / password-hash findings ────────────────────────────────────────
+    if token_result and token_result.findings:
+        _print_extra_findings("Token & Password Hash Findings", token_result.findings)
+
     # ── Report files ─────────────────────────────────────────────────────────
     if report_files:
         print(f"\n  {BOLD}Reports saved:{R}")
@@ -326,6 +361,12 @@ def main():
                         help="Seconds between requests (default 0.3)")
     parser.add_argument("--no-crawl",  action="store_true",
                         help="Skip crawling — test patterns only")
+    parser.add_argument("--no-headers", action="store_true",
+                        help="Skip HTTP security header analysis")
+    parser.add_argument("--no-jwt",    action="store_true",
+                        help="Skip JWT vulnerability analysis")
+    parser.add_argument("--no-tokens", action="store_true",
+                        help="Skip token entropy / password-hash analysis")
     parser.add_argument("--output-dir",default="reports",
                         help="Report output directory (default ./reports)")
     parser.add_argument("--no-html",   action="store_true")
@@ -453,7 +494,7 @@ def _run_scan(args, target) -> int:
         partial = scanner._partial_result if hasattr(scanner, "_partial_result") else None
         if partial and (partial.findings or partial.endpoints_tested > 0):
             _save_reports(args, reporter, target, partial, crawl_result, auth_info, partial=True)
-        sys.exit(1)
+        sys.exit(1)  # noqa: SIM105
 
     old_sigint  = signal.signal(signal.SIGINT,  _handle_signal)
     old_sigterm = signal.signal(signal.SIGTERM, _handle_signal)
@@ -478,26 +519,96 @@ def _run_scan(args, target) -> int:
 
     spinner.stop(f"IDOR scan complete  ({elapsed:.1f}s)")
 
-    # ── 4. Reports ────────────────────────────────────────────────────────────
-    report_files = _save_reports(args, reporter, target, idor_result, crawl_result, auth_info)
+    # ── 4. Security header analysis ───────────────────────────────────────────
+    header_result = None
+    if not args.no_headers:
+        sys.stdout.write(f"  {DIM}◌{R} Analysing security headers ...")
+        sys.stdout.flush()
+        header_result = HeaderAnalyzer(session=session).analyze(target)
+        n_hdr = len(header_result.findings)
+        sys.stdout.write(
+            f"\r  {GRN}◉{R} {BOLD}HEADERS{R}  "
+            f"{header_result.headers_checked} checked · "
+            f"{CYAN}{n_hdr} finding(s){R}"
+            f"                          \n"
+        )
+        sys.stdout.flush()
+    else:
+        status("·", "Security header analysis skipped (--no-headers)", DIM)
+
+    # ── 5. JWT vulnerability analysis ─────────────────────────────────────────
+    jwt_result = None
+    if not args.no_jwt:
+        sys.stdout.write(f"  {DIM}◌{R} Analysing JWT tokens ...")
+        sys.stdout.flush()
+        jwt_result = JWTAnalyzer(session=session, delay=args.delay).analyze(
+            target, crawl_result=crawl_result
+        )
+        n_jwt = len(jwt_result.findings)
+        sys.stdout.write(
+            f"\r  {GRN}◉{R} {BOLD}JWT{R}  "
+            f"{jwt_result.tokens_found} token(s) found · "
+            f"{CYAN}{n_jwt} finding(s){R}"
+            f"                          \n"
+        )
+        sys.stdout.flush()
+    else:
+        status("·", "JWT analysis skipped (--no-jwt)", DIM)
+
+    # ── 6. Token entropy & password-hash analysis ─────────────────────────────
+    token_result = None
+    if not args.no_tokens:
+        sys.stdout.write(f"  {DIM}◌{R} Analysing tokens & password hashing ...")
+        sys.stdout.flush()
+        token_result = TokenAnalyzer(session=session, delay=args.delay).analyze(
+            target, crawl_result=crawl_result
+        )
+        n_tok = len(token_result.findings)
+        sys.stdout.write(
+            f"\r  {GRN}◉{R} {BOLD}TOKENS{R}  "
+            f"{token_result.tokens_sampled} endpoint(s) probed · "
+            f"{CYAN}{n_tok} finding(s){R}"
+            f"                          \n"
+        )
+        sys.stdout.flush()
+    else:
+        status("·", "Token / hash analysis skipped (--no-tokens)", DIM)
+
+    # ── 7. Reports ────────────────────────────────────────────────────────────
+    report_files = _save_reports(
+        args, reporter, target, idor_result, crawl_result, auth_info,
+        header_result=header_result, jwt_result=jwt_result, token_result=token_result,
+    )
 
     # ── Summary ───────────────────────────────────────────────────────────────
-    print_summary(target, idor_result, crawl_result, auth_info, report_files)
+    print_summary(
+        target, idor_result, crawl_result, auth_info, report_files,
+        header_result=header_result, jwt_result=jwt_result, token_result=token_result,
+    )
 
     n_crit = sum(1 for f in idor_result.findings if f.severity == "CRITICAL")
     return 2 if n_crit else 1 if idor_result.findings else 0
 
 
-def _save_reports(args, reporter, target, idor_result, crawl_result, auth_info, partial=False):
+def _save_reports(
+    args, reporter, target, idor_result, crawl_result, auth_info,
+    partial=False, header_result=None, jwt_result=None, token_result=None,
+):
     tag = " (partial)" if partial else ""
     sys.stdout.write(f"  {DIM}◌{R} Saving reports{tag} ...")
     sys.stdout.flush()
     report_files = []
     if not args.no_json:
-        p = reporter.save_json(target, idor_result, crawl_result, auth_info)
+        p = reporter.save_json(
+            target, idor_result, crawl_result, auth_info,
+            header_result=header_result, jwt_result=jwt_result, token_result=token_result,
+        )
         report_files.append(("JSON", p))
     if not args.no_html:
-        p = reporter.save_html(target, idor_result, crawl_result, auth_info)
+        p = reporter.save_html(
+            target, idor_result, crawl_result, auth_info,
+            header_result=header_result, jwt_result=jwt_result, token_result=token_result,
+        )
         report_files.append(("HTML", p))
     sys.stdout.write(f"\r  {GRN}◉{R} {BOLD}REPORTS SAVED{R}{tag}                              \n")
     sys.stdout.flush()

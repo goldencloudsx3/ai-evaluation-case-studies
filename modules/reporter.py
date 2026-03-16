@@ -29,6 +29,46 @@ SEVERITY_EMOJI = {
     "INFO":     "[inf]",
 }
 
+REMEDIATION_ADVICE_EXTRA = {
+    "JWT": """
+JWT SECURITY:
+  1. Whitelist the accepted algorithm server-side — never trust alg from the token header.
+  2. Reject tokens where alg=none or alg is absent.
+  3. Use a cryptographically random HMAC secret (≥256 bits) or an RSA/EC key pair.
+  4. Never store sensitive data (passwords, private keys, mnemonics) in unencrypted JWT payloads.
+  5. For asymmetric algorithms, ensure the server never accepts HS256 signed with the public key.
+
+REFERENCES:
+  - OWASP JWT Cheat Sheet: https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_for_Java_Cheat_Sheet.html
+  - PortSwigger JWT Attacks: https://portswigger.net/web-security/jwt
+""",
+    "HEADERS": """
+HTTP SECURITY HEADERS:
+  1. HSTS — Add: Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+  2. CSP — Implement a restrictive Content-Security-Policy; avoid 'unsafe-inline' and 'unsafe-eval'.
+  3. X-Frame-Options — Add: X-Frame-Options: DENY  (or CSP frame-ancestors 'none').
+  4. X-Content-Type-Options — Add: X-Content-Type-Options: nosniff
+  5. Cookies — Set Secure, HttpOnly, and SameSite=Strict on all session cookies.
+  6. Mixed Content — Ensure all resources load over HTTPS.
+
+REFERENCES:
+  - OWASP Secure Headers: https://owasp.org/www-project-secure-headers/
+  - Mozilla Security Guidelines: https://infosec.mozilla.org/guidelines/web_security
+""",
+    "TOKENS": """
+TOKEN & PASSWORD HASH SECURITY:
+  1. Generate tokens with a CSPRNG: Python secrets.token_hex(32) / Node crypto.randomBytes(32).
+  2. Never use sequential IDs or timestamps as session identifiers.
+  3. Minimum token length: 128 bits of entropy.
+  4. For password hashing use argon2id, bcrypt (cost ≥12), or scrypt — never MD5 or SHA-1.
+  5. Never return password hashes in API responses.
+
+REFERENCES:
+  - OWASP Password Storage Cheat Sheet: https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
+  - OWASP Session Management: https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
+""",
+}
+
 REMEDIATION_ADVICE = {
     "IDOR_KEY_EXPOSURE": """
 REMEDIATION:
@@ -121,6 +161,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
 <h2>IDOR / Key Exposure Findings</h2>
 {findings_html}
+
+<h2>Security Header Findings</h2>
+{header_findings_html}
+
+<h2>JWT Vulnerability Findings</h2>
+{jwt_findings_html}
+
+<h2>Token &amp; Password Hash Findings</h2>
+{token_findings_html}
 
 <h2>Remediation Guidance</h2>
 <pre class="code">{remediation}</pre>
@@ -231,6 +280,9 @@ class Reporter:
         idor_result,
         crawl_result,
         auth_info: dict,
+        header_result=None,
+        jwt_result=None,
+        token_result=None,
     ) -> str:
         """Save scan results as JSON."""
         timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -264,10 +316,33 @@ class Reporter:
                     "auth_required": ep.auth_required,
                 })
 
+        # Serialize extra finding lists generically
+        def _serialize_findings(findings):
+            return [
+                {
+                    "severity":       f.severity,
+                    "title":          f.title,
+                    "description":    f.description,
+                    "evidence":       f.evidence,
+                    "recommendation": f.recommendation,
+                    "category":       getattr(f, "category", ""),
+                }
+                for f in (findings or [])
+            ]
+
+        all_extra = (
+            (header_result.findings if header_result else []) +
+            (jwt_result.findings    if jwt_result    else []) +
+            (token_result.findings  if token_result  else [])
+        )
+        n_extra_crit = sum(1 for f in all_extra if f.severity == "CRITICAL")
+        n_extra_high = sum(1 for f in all_extra if f.severity == "HIGH")
+        n_extra_med  = sum(1 for f in all_extra if f.severity == "MEDIUM")
+
         report = {
             "meta": {
                 "tool": "Crypto Vulnerability Tester",
-                "version": "1.0.0",
+                "version": "2.0.0",
                 "scan_date": datetime.datetime.utcnow().isoformat(),
                 "target": target,
                 "authorization": "AUTHORIZED TESTING ONLY",
@@ -276,12 +351,24 @@ class Reporter:
             "summary": {
                 "endpoints_tested": idor_result.endpoints_tested,
                 "ids_tested": idor_result.ids_tested,
-                "total_findings": len(idor_result.findings),
-                "critical": sum(1 for f in idor_result.findings if f.severity == "CRITICAL"),
-                "high": sum(1 for f in idor_result.findings if f.severity == "HIGH"),
-                "medium": sum(1 for f in idor_result.findings if f.severity == "MEDIUM"),
+                "total_findings": len(idor_result.findings) + len(all_extra),
+                "idor_critical": sum(1 for f in idor_result.findings if f.severity == "CRITICAL"),
+                "idor_high":     sum(1 for f in idor_result.findings if f.severity == "HIGH"),
+                "idor_medium":   sum(1 for f in idor_result.findings if f.severity == "MEDIUM"),
+                "extra_critical": n_extra_crit,
+                "extra_high":     n_extra_high,
+                "extra_medium":   n_extra_med,
             },
             "idor_findings": findings_data,
+            "header_findings": _serialize_findings(
+                header_result.findings if header_result else []
+            ),
+            "jwt_findings": _serialize_findings(
+                jwt_result.findings if jwt_result else []
+            ),
+            "token_findings": _serialize_findings(
+                token_result.findings if token_result else []
+            ),
             "discovered_endpoints": endpoints_data,
             "errors": idor_result.errors,
         }
@@ -297,6 +384,9 @@ class Reporter:
         idor_result,
         crawl_result,
         auth_info: dict,
+        header_result=None,
+        jwt_result=None,
+        token_result=None,
     ) -> str:
         """Save scan results as HTML report."""
         timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -360,9 +450,46 @@ class Reporter:
   {endpoint_rows or '<tr><td colspan="5">No endpoints discovered</td></tr>'}
 </table>
 """
+        # ── Extra findings HTML (headers / JWT / tokens) ──────────────────────
+        def _extra_findings_html(label: str, findings_list) -> str:
+            if not findings_list:
+                return f"<p>No {label} findings.</p>"
+            parts = []
+            for f in findings_list:
+                sev_class = f.severity.lower()
+                parts.append(f"""
+<div class="finding {sev_class}">
+  <h3>[{f.severity}] {f.title}</h3>
+  <table>
+    <tr><th>Description</th><td>{f.description}</td></tr>
+    <tr><th>Evidence</th><td><code>{f.evidence}</code></td></tr>
+    <tr><th>Recommendation</th><td>{f.recommendation}</td></tr>
+  </table>
+</div>""")
+            return "\n".join(parts)
+
+        header_html = _extra_findings_html(
+            "security header", header_result.findings if header_result else []
+        )
+        jwt_html = _extra_findings_html(
+            "JWT", jwt_result.findings if jwt_result else []
+        )
+        token_html = _extra_findings_html(
+            "token / password hash", token_result.findings if token_result else []
+        )
+
+        all_extra = (
+            (header_result.findings if header_result else []) +
+            (jwt_result.findings    if jwt_result    else []) +
+            (token_result.findings  if token_result  else [])
+        )
+
         remediation = (
             REMEDIATION_ADVICE["IDOR_KEY_EXPOSURE"] +
-            REMEDIATION_ADVICE["PRIVATE_KEY_IN_RESPONSE"]
+            REMEDIATION_ADVICE["PRIVATE_KEY_IN_RESPONSE"] +
+            REMEDIATION_ADVICE_EXTRA["JWT"] +
+            REMEDIATION_ADVICE_EXTRA["HEADERS"] +
+            REMEDIATION_ADVICE_EXTRA["TOKENS"]
         )
 
         findings = idor_result.findings
@@ -371,13 +498,16 @@ class Reporter:
             scan_date=datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
             endpoints_tested=idor_result.endpoints_tested,
             ids_tested=idor_result.ids_tested,
-            total_findings=len(findings),
+            total_findings=len(findings) + len(all_extra),
             critical_count=sum(1 for f in findings if f.severity == "CRITICAL"),
             high_count=sum(1 for f in findings if f.severity == "HIGH"),
             medium_count=sum(1 for f in findings if f.severity == "MEDIUM"),
             low_count=sum(1 for f in findings if f.severity in ("LOW", "INFO")),
             endpoints_html=endpoints_html,
             findings_html=findings_html,
+            header_findings_html=header_html,
+            jwt_findings_html=jwt_html,
+            token_findings_html=token_html,
             remediation=remediation,
         )
 
