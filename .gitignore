@@ -1,7 +1,36 @@
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+
+# Environment / secrets — NEVER commit these
+.env
+.env.local
+.env.*.local
 
 # Authorized targets list — keep off git
 authorized_targets.json
 authorized_targets.txt
+
+# Scan reports (may contain sensitive data — commit selectively)
+reports/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env_kittypaw/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log

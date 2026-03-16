@@ -1,185 +1,286 @@
-# Crypto Vulnerability Tester
+# 🐾 KittyPaw Scanner
 
-> **FOR AUTHORIZED SECURITY TESTING ONLY**
-> Unauthorized use against systems you do not own or have explicit written permission to test is illegal under CFAA, CMA, and similar laws worldwide.
+> **Crypto / Web3 Vulnerability Scanner** — IDOR · Key Exposure · JWT · Security Headers · Token Entropy
+>
+> Real-time Telegram alerts · Multi-platform · Bug-bounty ready
 
-A CLI tool that tests blockchain/crypto websites for the **IDOR key exposure vulnerability** class — where insufficient authorization checks on wallet/key API endpoints allow an attacker to read other users' private and public cryptographic keys by enumerating object IDs.
+```
+  ╔════════════════════════════════════════════════════════╗
+  ║            K I T T Y P A W   S C A N N E R            ║
+  ║────────────────────────────────────────────────────────║
+  ║       IDOR · KEY-EXPOSURE · JWT · HEADERS · TOKENS     ║
+  ║          github.com/goldencloudsx3/GitSheild           ║
+  ╚════════════════════════════════════════════════════════╝
+```
 
----
-
-## Vulnerability Background
-
-The write-up this tool is modeled on describes a **Broken Access Control / IDOR** vulnerability on a blockchain wallet website:
-
-1. The site exposed an API endpoint that returned wallet keypairs (private + public keys)
-2. The endpoint accepted a user/wallet ID as a path or query parameter
-3. **No authorization check** verified whether the requester owned the requested wallet
-4. An attacker could authenticate, discover their own numeric ID, then enumerate adjacent IDs to access **any other user's private keys**
-
-This falls under:
-- [OWASP A01:2021 – Broken Access Control](https://owasp.org/Top10/A01_2021-Broken_Access_Control/)
-- [OWASP WSTG-AUTHZ-04 – Testing for IDOR](https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/05-Authorization_Testing/04-Testing_for_Insecure_Direct_Object_References)
-- CWE-639: Authorization Bypass Through User-Controlled Key
+**FOR AUTHORIZED SECURITY TESTING ONLY.**
+Always obtain written permission before scanning any target.
+Unauthorized use is illegal under CFAA, CMA, and similar laws worldwide.
 
 ---
 
-## Features
+## What Is This?
 
-| Module | What it does |
-|--------|-------------|
-| `modules/idor_scanner.py` | Enumerates IDs on 30+ crypto API endpoint patterns, detects key material in responses |
-| `modules/key_detector.py` | Regex + heuristic detection of ETH private keys, WIF keys, mnemonics, keystores, xpriv, Solana keys |
-| `modules/crawler.py` | Spiders the target site, analyzes JS bundles for hidden API routes, wordlist-fuzzes 50+ crypto paths, detects auth scheme |
-| `modules/reporter.py` | Console (colorized), JSON, and HTML reports with remediation guidance |
-| `crypto_vuln_tester.py` | Main CLI entry point |
+KittyPaw Scanner is a purpose-built vulnerability scanner for Web3 / crypto applications. It hunts the vulnerability classes that pay the most on bug bounty platforms:
+
+| Module | What it finds | Payout potential |
+|--------|--------------|-----------------|
+| **IDOR Scanner** | Wallet/key endpoints with no access control | Critical · $5k–$250k+ |
+| **Key Detector** | Exposed private keys, mnemonics, keystores | Critical · up to max bounty |
+| **JWT Analyzer** | alg:none bypass, algorithm confusion, weak secrets | High · $2k–$50k |
+| **Header Analyzer** | Missing HSTS, CSP, clickjacking protection | Low–Medium |
+| **Token Analyzer** | Weak entropy, MD5/SHA-1 password hashing | Medium |
+
+**Works without an account** — uses differential baseline analysis so you can probe endpoints without registering.
+
+**Platforms:** Immunefi · Code4rena · HackerOne · Bugcrowd · Sherlock · YesWeHack · Intigriti · any web3 app with a public bug bounty.
 
 ---
 
-## Installation
+## Mac Setup — Full Step-by-Step
+
+Open **Terminal** (`⌘ Space` → type `Terminal` → Enter).
+
+### Step 1 — Install Homebrew
 
 ```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+After install, follow the on-screen instructions to add Homebrew to your PATH (Apple Silicon shows two `echo` + `eval` lines — run them).
+
+### Step 2 — Install Python 3
+
+```bash
+brew install python3
+python3 --version   # should show 3.11 or 3.12+
+```
+
+### Step 3 — Install Git
+
+```bash
+brew install git
+git --version
+```
+
+### Step 4 — Add SSH key to GitHub
+
+```bash
+ssh-keygen -t ed25519 -C "your_email@example.com"
+# Press Enter for all prompts
+
+cat ~/.ssh/id_ed25519.pub | pbcopy   # copies public key to clipboard
+```
+
+Go to **GitHub → Settings → SSH and GPG keys → New SSH key** → paste → save.
+
+### Step 5 — Clone GitSheild
+
+```bash
+cd ~/Desktop
+git clone git@github.com:goldencloudsx3/GitSheild.git
+cd GitSheild
+```
+
+### Step 6 — Create Python virtual environment
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+# Prompt now shows (.venv) — dependencies stay isolated
+```
+
+> Each new Terminal session: `cd ~/Desktop/GitSheild && source .venv/bin/activate`
+
+### Step 7 — Install dependencies
+
+```bash
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
+
+### Step 8 — Configure .env
+
+```bash
+cp .env.example .env
+open -e .env      # opens in TextEdit on Mac
+```
+
+Fill in:
+```
+TELEGRAM_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
+```
+
+Save and close.
+
+### Step 9 — Get your Telegram Chat ID
+
+1. Open Telegram → find **@Kittypawscannerbot**
+2. Send the bot any message (e.g. `hello`)
+3. Run:
+   ```bash
+   python get_chat_id.py --token YOUR_BOT_TOKEN
+   ```
+4. Copy the number shown and paste it into `.env` as `TELEGRAM_CHAT_ID`
+
+### Step 10 — Test it works
+
+```bash
+python crypto_vuln_tester.py \
+  --target https://example.com \
+  --yes \
+  --no-crawl --no-jwt --no-headers --no-tokens \
+  --max-ids 3
+```
+
+You should see the KittyPaw banner, a reachability check, and a quick scan.
+If Telegram is configured, you'll get a start + summary message in the bot.
+
+---
+
+## GitHub Repo — Permissions & Push
+
+If you need to grant access or push from a collaborator account:
+
+```bash
+# Push your changes
+git add -A
+git commit -m "your message"
+git push origin main
+```
+
+**To grant collaborator access:** Repo → **Settings → Collaborators → Add people**.
+
+---
+
+## Telegram Bot Setup
+
+### Getting Your Bot Token
+
+1. Telegram → search **@BotFather**
+2. Send `/newbot`
+3. Follow prompts → BotFather gives you a token like `123456789:ABCdef...`
+4. Paste it into `.env` as `TELEGRAM_TOKEN=`
+
+### What You Receive
+
+| Event | Message |
+|-------|---------|
+| Scan starts | 🐾 Target + timestamp |
+| CRITICAL finding | 🔴 URL, evidence, key type |
+| HIGH finding | 🟠 URL, evidence |
+| Rate limited 429 | ⏳ URL + backoff time |
+| Scan complete | 📊 Full stats summary |
+| Scan error | ❌ Error details |
 
 ---
 
 ## Usage
 
-### Fully unauthenticated scan (no account needed)
+### Basic scan
+
 ```bash
-python crypto_vuln_tester.py --target https://target.example.com
+python crypto_vuln_tester.py --target https://target.com
 ```
 
-### With an anchor ID spotted on a public page (no login required)
-```bash
-# E.g. you see /user/4821 on a public profile — use that as the anchor
-python crypto_vuln_tester.py \
-  --target https://target.example.com \
-  --id 4821 \
-  --max-ids 50
-```
+### With Telegram alerts (inline)
 
-### With optional auth token (reaches auth-protected endpoints too)
 ```bash
 python crypto_vuln_tester.py \
-  --target https://target.example.com \
-  --token eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+  --target https://target.com \
+  --telegram-token 123:ABC \
+  --telegram-chat-id -100xxx
 ```
 
-### Skip crawling (faster, pattern-only)
+### Authenticated scan (Bearer token)
+
 ```bash
-python crypto_vuln_tester.py \
-  --target https://target.example.com \
-  --no-crawl \
-  --max-ids 100
+python crypto_vuln_tester.py --target https://target.com --token eyJhbGci...
+```
+
+### Session cookie
+
+```bash
+python crypto_vuln_tester.py --target https://target.com --cookie "session=abc123"
+```
+
+### Enable 403 bypass headers
+
+```bash
+python crypto_vuln_tester.py --target https://target.com --bypass-headers
+```
+
+Adds `X-Forwarded-For: 127.0.0.1`, `X-Custom-IP-Authorization: 127.0.0.1`, and related headers — widely documented public WAF bypass technique.
+
+### Route through Burp Suite
+
+```bash
+python crypto_vuln_tester.py --target https://target.com --proxy http://127.0.0.1:8080 --no-verify
+```
+
+### Auto-retry on failure
+
+```bash
+python crypto_vuln_tester.py --target https://target.com --auto-retry 3 --retry-delay 60
+```
+
+### All flags
+
+```
+  --target            Base URL (required)
+  --id                Seed integer ID from a public page
+  --token             Bearer token / API key
+  --cookie            Session cookie string
+  --max-ids           IDs to enumerate per endpoint (default 30)
+  --delay             Seconds between requests (default 0.3)
+  --timeout           Per-request read timeout (default 10s)
+  --no-crawl          Skip endpoint discovery
+  --no-headers        Skip security header analysis
+  --no-jwt            Skip JWT analysis
+  --no-tokens         Skip token entropy analysis
+  --bypass-headers    Add X-Forwarded-For / WAF bypass headers
+  --proxy             HTTP proxy URL (Burp Suite etc.)
+  --no-verify         Disable SSL certificate verification
+  --output-dir        Report directory (default ./reports)
+  --no-html           Skip HTML report
+  --no-json           Skip JSON report
+  --telegram-token    Telegram bot token
+  --telegram-chat-id  Telegram chat ID
+  --yes / -y          Skip authorization confirmation
+  --verbose / -v      Verbose output
+  --auto-retry N      Retry up to N times on failure
+  --retry-delay S     Seconds between retries (default 30)
 ```
 
 ---
 
-## How It Works — No Account Required
+## Common Error Fixes
 
-The tool uses **differential/baseline analysis** to detect IDOR without registering on the target:
+| Error | Fix |
+|-------|-----|
+| `SSL: CERTIFICATE_VERIFY_FAILED` | Add `--no-verify` |
+| `ConnectionError: Max retries exceeded` | Check internet/VPN. Try `--delay 1.0` |
+| `HTTP 403 everywhere` | Try `--bypass-headers` |
+| `HTTP 429 everywhere` | Scanner auto-backs off. Also try `--delay 2.0` |
+| `Telegram: Invalid token` | Double-check token from @BotFather |
+| `Telegram: Chat not found` | Send a message to bot first, re-run `get_chat_id.py` |
+| `ModuleNotFoundError` | Run `pip install -r requirements.txt` inside venv |
+| `(.venv) not in prompt` | Run `source .venv/bin/activate` |
+| `Reports not saving` | `mkdir -p reports` |
+| `UnicodeDecodeError` on some sites | Scanner handles this; if it persists add `--no-crawl` |
 
+---
+
+## Manual Verification
+
+After a scan, use `check_findings.py` to re-verify flagged endpoints:
+
+```bash
+python check_findings.py --report reports/scan_2026XXXX.json
+python check_findings.py --report reports/scan_2026XXXX.json --token eyJ...
+python check_findings.py --report reports/scan_2026XXXX.json --key-only
 ```
-1. CALIBRATE (per endpoint)
-   └─ Hit /api/wallet/999999999/keys with a known-invalid canary ID
-      → Records the "not found" baseline: status, body size, content hash
-
-2. ENUMERATE
-   └─ Try IDs 1..N against the same endpoint:
-      GET /api/wallet/1/keys  → 404 "Not Found" (matches baseline, skip)
-      GET /api/wallet/2/keys  → 404 "Not Found" (matches baseline, skip)
-      GET /api/wallet/3/keys  → 200 {"privateKey": "0xabc..."}  ← DEVIATION = IDOR!
-                                    ↑ body 400B larger than baseline, direct key found
-
-3. DETECT
-   └─ Two parallel detection layers:
-      a) Direct: regex/heuristic scan of every response for key material
-      b) Differential: flag any response that deviates from the baseline
-         (different status code, body size >100B from baseline, new JSON fields)
-
-4. REPORT
-   └─ Save findings, generate HTML/JSON report with remediation guidance
-```
-
-### Optional: Anchor ID (improves targeting)
-
-If you spot a numeric user/wallet ID anywhere on the public site (a profile page,
-transaction detail, public explorer, etc.) — pass it with `--id N`.
-The tool will enumerate IDs around that anchor for more targeted results.
-No login or registration required.
-
----
-
-## CLI Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--target` | (required) | Target base URL |
-| `--id` | None | Optional anchor ID spotted on a public page (no login needed) |
-| `--token` | None | Bearer token or API key |
-| `--cookie` | None | Session cookie (`name=value; name2=value2`) |
-| `--max-ids` | 30 | Number of IDs to enumerate |
-| `--delay` | 0.5 | Seconds between requests (be respectful) |
-| `--no-crawl` | False | Skip site crawling |
-| `--output-dir` | `./reports` | Report output directory |
-| `--no-html` | False | Skip HTML report |
-| `--no-json` | False | Skip JSON report |
-| `--no-verify` | False | Disable SSL verification (test environments) |
-| `--yes` / `-y` | False | Skip authorization confirmation prompt |
-| `--verbose` / `-v` | False | Verbose output |
-
----
-
-## Key Patterns Detected
-
-The key detector (`modules/key_detector.py`) identifies:
-
-| Pattern | Severity | Example |
-|---------|----------|---------|
-| Ethereum private key (hex) | CRITICAL | `0xac0974bec...` |
-| Bitcoin WIF private key | CRITICAL | `5KJvsngHeMpm884wtkJNzQGaCErckhHJBGFsvd3VyK5qMZXj3hS` |
-| BIP39 mnemonic phrase | CRITICAL | `abandon ability able about above...` |
-| Extended private key | CRITICAL | `xprv9s21ZrQH...` |
-| Encrypted keystore JSON | CRITICAL | `{"version":3,"crypto":{...}}` |
-| Solana/Substrate base58 key | CRITICAL | `5J...` (87 chars) |
-| JSON `privateKey` field | CRITICAL | `{"privateKey": "..."}` |
-| Raw 64-char hex | HIGH | May be a private key — requires review |
-| Ethereum public key | LOW | `0x04...` (128 hex chars) |
-| Ethereum address | INFO | `0x742d35Cc...` |
-
----
-
-## Reports
-
-Reports are saved to `./reports/` by default:
-
-- **`scan_YYYYMMDD_HHMMSS.json`** — Machine-readable, suitable for automation
-- **`scan_YYYYMMDD_HHMMSS.html`** — Human-readable with remediation guidance
-
----
-
-## Remediation Guidance
-
-If vulnerabilities are found, report the following to the target's security team:
-
-### Immediate Fixes
-1. **Add authorization checks** on every key/wallet endpoint — verify the requesting user owns the resource
-2. **Switch from sequential IDs** to UUIDs or other non-guessable identifiers
-3. **Never return raw private keys** in API responses — use encrypted export flows
-4. **Rate-limit** key endpoints and alert on cross-user access patterns
-
-### Secure Design
-- Implement **Object-Level Authorization** (check ownership, not just authentication)
-- For key export features: require additional auth factor, use one-time tokens, log all access
-- Consider **client-side key management** (keys never leave the user's device)
-- Use **HSMs** for any server-side key storage
-
-### References
-- [OWASP Broken Access Control](https://owasp.org/Top10/A01_2021-Broken_Access_Control/)
-- [PortSwigger IDOR Lab](https://portswigger.net/web-security/access-control/idor)
-- [Immunefi Web3 Bug Bounty](https://immunefi.com/)
-- [HackenProof Web3 Security](https://hackenproof.com/)
 
 ---
 
@@ -187,12 +288,136 @@ If vulnerabilities are found, report the following to the target's security team
 
 | Code | Meaning |
 |------|---------|
-| 0 | No findings |
-| 1 | Non-critical findings |
-| 2 | Critical findings (private key exposure) |
+| `0` | Clean — no findings |
+| `1` | Non-critical findings |
+| `2` | CRITICAL (private key exposure) |
+| `3` | Scan failed / incomplete |
 
 ---
 
-## Legal
+## Bug Bounty Guide — Profit Potential (2026)
 
-This tool is provided for **authorized penetration testing, bug bounty research, and security education only**. The authors assume no liability for misuse. Always obtain explicit written authorization before testing any system you do not own.
+### Why Web3 IDOR Pays So Much
+
+Most DeFi/crypto projects are built by blockchain engineers who understand cryptography perfectly but have limited API security experience. The result: wallet key management endpoints frequently lack the most basic access control.
+
+A single IDOR on `/api/wallet/{id}/export` with no ownership check = full fund drain potential = maximum bounty.
+
+### Platform Payouts
+
+| Platform | Target type | IDOR/Key Exposure |
+|----------|-------------|------------------|
+| **Immunefi** | DeFi protocols | $5,000 – $10,000,000 |
+| **HackerOne** | Web3 startups | $2,500 – $250,000 |
+| **Bugcrowd** | Exchanges/wallets | $500 – $100,000 |
+| **Code4rena** | Protocols + API | $1,000 – $50,000 |
+| **Sherlock** | DeFi | $1,000 – $150,000 |
+| **YesWeHack** | EU web3 | €500 – €50,000 |
+
+### What This Tool Finds That Pays
+
+**CRITICAL — Private Key Exposure**
+- REST endpoint returning raw private key without auth check
+- GraphQL field `privateKey` with no authorization resolver
+- Mnemonic seed phrase in API response
+- Encrypted keystore JSON in unauthenticated endpoint
+- Private key hardcoded in JavaScript bundle (JS analysis module)
+
+**HIGH — Wallet IDOR**
+- Other users' wallet balances accessible by ID enumeration
+- Transaction history exposed without ownership check
+
+**HIGH — JWT Vulnerabilities**
+- `alg: none` bypass → forge any user's token
+- RS256→HS256 confusion → sign with server's public key
+
+**MEDIUM — Misconfigs**
+- Missing HSTS on a financial app
+- Sensitive data in unencrypted JWT payload
+
+### Workflow That Gets Paid
+
+```
+1.  Find a web3 target with a live bug bounty (Immunefi recommended)
+2.  Run KittyPaw for initial recon + key-endpoint mapping
+3.  Note key-related endpoints the scanner discovers
+4.  Open the actual app in browser → DevTools → Network → XHR
+5.  Perform real actions: login, deposit, view wallet
+6.  Capture actual API calls with real IDs
+7.  Test those real endpoints with forged/wrong IDs
+8.  Document proof: curl command + screenshot of response
+9.  Write a clear, concise report (under 1000 words)
+10. Submit with CIA triad impact
+```
+
+### Report Template (CRITICAL finding)
+
+```
+Title: IDOR on /api/wallet/{id}/export exposes private key without authorization
+
+Summary:
+Any unauthenticated user can retrieve the private key for any wallet by
+enumerating the wallet ID parameter on /api/wallet/{id}/export.
+
+Steps to Reproduce:
+1. GET https://target.com/api/wallet/1/export
+2. GET https://target.com/api/wallet/2/export
+3. Response contains { "privateKey": "0x..." }
+
+Proof:
+[Screenshot of response showing private key]
+
+Impact:
+Confidentiality: Full private key material exposed for all wallets
+Integrity: Attacker can sign arbitrary transactions
+Availability: All user funds can be drained
+
+CVSS: 9.8 (Critical)
+
+Remediation:
+- Add ownership check: verify authenticated user owns wallet {id}
+- Never return raw private key material in API responses
+- Use one-time export tokens with short expiry if export is required
+```
+
+---
+
+## Project Structure
+
+```
+GitSheild/
+├── crypto_vuln_tester.py     ← Main entry point
+├── check_findings.py         ← Manual endpoint verification
+├── get_chat_id.py            ← Telegram chat ID finder
+├── requirements.txt
+├── .env.example              ← Copy → .env, fill in secrets
+├── .gitignore
+└── modules/
+    ├── idor_scanner.py       ← IDOR + differential analysis
+    ├── key_detector.py       ← Private key / mnemonic detection
+    ├── crawler.py            ← Endpoint discovery + JS analysis
+    ├── reporter.py           ← JSON + HTML report generation
+    ├── jwt_analyzer.py       ← JWT vulnerability testing
+    ├── header_analyzer.py    ← HTTP security headers audit
+    ├── token_analyzer.py     ← Token entropy + hash analysis
+    └── telegram_notifier.py  ← Real-time Telegram alerts
+```
+
+---
+
+## Security Notes (Outside of Scope — Valid Risks for Manual Review)
+
+> **Scan rate on small servers** — Default 0.3s delay is fine for most APIs but could stress very small production servers. Use `--delay 1.0` or higher on low-traffic targets to avoid unintentional DoS.
+
+> **Report confidentiality** — `reports/` is `.gitignore`d by default. If you ever push a report with real key material to a public repo, those keys become public. Keep reports local or in a private repository.
+
+> **Telegram token security** — Your bot token = API credentials. Anyone with it can post as your bot. Store in `.env` only. Never commit or share it.
+
+> **Proxy trust** — When using `--proxy`, all traffic (including auth cookies/tokens) flows through it. Only use on a machine you fully control.
+
+> **SSL bypass** — `--no-verify` disables TLS validation. Only use on internal/test targets or when a program explicitly allows it. Avoid on untrusted networks where MITM is possible.
+
+---
+
+*KittyPaw Scanner — built for authorized security research in the Web3 ecosystem.*
+*Always hunt responsibly.*
