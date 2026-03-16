@@ -48,15 +48,18 @@ SEV_ICON = {"CRITICAL": f"{RED}🔴{R}", "HIGH": f"{YEL}🟠{R}",
 
 _W = 62
 
-BANNER = (
-    f"\n{CYAN}{BOLD}  ╔{'═'*_W}╗\n"
-    f"  ║{'':^{_W}}║\n"
-    f"  ║{'🐾  KITTYPAW  AUTO-HUNT  🐾':^{_W+8}}║\n"
-    f"  ║{'Immunefi  ·  GitHub  ·  Deep Git History':^{_W}}║\n"
-    f"  ║{'':^{_W}}║\n"
-    f"  ╚{'═'*_W}╝{R}\n"
-    f"  {DIM}{'[ authorized security testing only ]':^{_W+4}}{R}\n"
-)
+BANNER = f"""\n{CYAN}{BOLD}  ╔══════════════════════════════════════════════════════════════╗
+  ║                                                              ║
+  ║     /\\_____/\\    K I T T Y P A W   S C A N N E R              ║
+  ║    /  o   o  \\   ─────────────────────────────────            ║
+  ║   ( ==  ^  == )  IDOR · KEY-EXPOSURE · JWT                    ║
+  ║    )  =====  (   HEADERS · TOKENS · WEB3                      ║
+  ║   (    ___    )  ─────────────────────────────────            ║
+  ║    \\___|_|___/   t.me/Kittypawscannerbot                      ║
+  ║        | |       Immunefi · HackerOne · Bugcrowd              ║
+  ║       _| |_      [ authorized testing only ]                  ║
+  ║                                                              ║
+  ╚══════════════════════════════════════════════════════════════╝{R}\n"""
 
 
 def _sec(title: str) -> None:
