@@ -113,25 +113,28 @@ class ImmunefiScraper:
             log.error("HTML fetch failed: %s", exc)
             return []
 
+        html = r.text
         targets: List[BountyTarget] = []
 
-        # Immunefi uses React Server Components (RSC) streaming.
-        # Bounty data is embedded in: self.__next_f.push([1,"<escaped-json>"])
+        # ── Method 1: RSC streaming chunks ────────────────────────────────────
+        # Immunefi uses React Server Components: self.__next_f.push([1,"<json>"])
         rsc_chunks = re.findall(
-            r'self\.__next_f\.push\(\[1,"(.+?)"\]\)', r.text, re.DOTALL
+            r'self\.__next_f\.push\(\[1,"(.+?)"\]\)', html, re.DOTALL
         )
         for chunk in rsc_chunks:
             try:
-                # Unescape the JSON string value
-                unescaped = chunk.encode().decode("unicode_escape")
+                # Use json.loads to properly unescape the string value
+                unescaped = json.loads(f'"{chunk}"')
             except Exception:
-                continue
+                try:
+                    unescaped = chunk.encode().decode("unicode_escape")
+                except Exception:
+                    continue
 
             if '"maxBounty"' not in unescaped:
                 continue
 
-            # The bounties array looks like: [{"contentfulId":..., "maxBounty":...}, ...]
-            # followed by ,"title":"Bug Bounties"
+            # Extract the bounties array: [{"contentfulId":..., "maxBounty":...}, ...]
             match = re.search(
                 r'\[(\{"contentfulId".+?)\](?=,\s*"title")',
                 unescaped,
@@ -155,12 +158,50 @@ class ImmunefiScraper:
 
             if targets:
                 log.info("RSC parse: found %d bounty programs", len(targets))
-                return targets  # success — no need to scan further chunks
+                return targets
 
-        # Last-resort: extract GitHub org links by regex over raw HTML
-        log.warning("RSC parse yielded no targets — falling back to GitHub URL extraction")
+        # ── Method 2: Direct regex over raw HTML ──────────────────────────────
+        # Extract project+maxBounty pairs directly without chunk parsing
+        log.debug("RSC chunk parse yielded nothing — trying direct HTML regex")
+        pairs = re.findall(
+            r'"project"\s*:\s*"([^"]+)"[^}]{0,300}"maxBounty"\s*:\s*(\d+)',
+            html,
+        )
+        if not pairs:
+            # also try reversed field order
+            pairs_r = re.findall(
+                r'"maxBounty"\s*:\s*(\d+)[^}]{0,300}"project"\s*:\s*"([^"]+)"',
+                html,
+            )
+            pairs = [(name, amt) for amt, name in pairs_r]
+
+        seen_names: set = set()
+        for name, amt in pairs:
+            if name in seen_names:
+                continue
+            seen_names.add(name)
+            # Try to find slug for this project
+            slug_m = re.search(
+                r'"slug"\s*:\s*"([^"]+)"[^}]{0,500}"project"\s*:\s*"' + re.escape(name) + '"',
+                html,
+            )
+            slug = slug_m.group(1) if slug_m else name.lower().replace(" ", "-")
+            targets.append(BountyTarget(
+                name=name,
+                max_usd=int(amt),
+                github_org_url=None,
+                github_org=None,
+                bounty_url=f"https://immunefi.com/bug-bounty/{slug}/",
+            ))
+
+        if targets:
+            log.info("Direct regex parse: found %d programs", len(targets))
+            return targets
+
+        # ── Method 3: GitHub org URL extraction ───────────────────────────────
+        log.warning("All parse methods failed — extracting GitHub org URLs only")
         seen: set = set()
-        for m in _GH_ORG_RE.finditer(r.text):
+        for m in _GH_ORG_RE.finditer(html):
             org = m.group(1)
             if org.lower() in ("torvalds", "github", "features", "apps"):
                 continue
