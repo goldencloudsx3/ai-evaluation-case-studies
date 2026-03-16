@@ -8,6 +8,8 @@ FOR AUTHORIZED SECURITY TESTING ONLY.
 """
 
 import json
+import os
+import re
 import datetime
 from pathlib import Path
 
@@ -515,3 +517,174 @@ class Reporter:
             fh.write(html)
 
         return str(filename)
+
+    # ── Disclosure draft (auto-hunt / git scan findings) ──────────────────────
+
+    def save_git_report(self, findings, scan_results, target_label: str):
+        """
+        Save a lightweight JSON + HTML report for git deep-scan findings.
+        Returns (json_path, html_path).
+        """
+        import json as _json
+        from datetime import datetime, timezone
+
+        ts   = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        slug = re.sub(r"[^a-zA-Z0-9_-]", "_", target_label)[:40]
+
+        # JSON
+        data = {
+            "meta":    {"tool": "KittyPaw AutoHunt", "date": ts, "target": target_label},
+            "summary": {
+                "repos_scanned": len(scan_results),
+                "total_findings": len(findings),
+                "critical": sum(1 for f in findings if f.severity == "CRITICAL"),
+                "high":     sum(1 for f in findings if f.severity == "HIGH"),
+            },
+            "findings": [
+                {
+                    "severity":    f.severity,
+                    "score":       f.score,
+                    "source_type": f.source_type,
+                    "repo":        f.repo_or_url,
+                    "location":    f.location,
+                    "description": f.description,
+                    "redacted":    f.redacted,
+                    "verified":    f.verified,
+                }
+                for f in findings
+            ],
+        }
+        json_path = os.path.join(self.output_dir, f"git_{slug}_{ts}.json")
+        with open(json_path, "w") as fh:
+            _json.dump(data, fh, indent=2)
+
+        # Minimal HTML
+        rows = ""
+        for f in findings:
+            color = {"CRITICAL": "#ff4444", "HIGH": "#ff8800",
+                     "MEDIUM":   "#ffcc00", "LOW": "#44cc44"}.get(f.severity, "#888")
+            ver  = " ✓" if f.verified else ""
+            rows += (
+                f'<tr><td style="color:{color}">{f.severity}{ver}</td>'
+                f"<td>{f.repo_or_url}</td><td>{f.location}</td>"
+                f"<td>{f.description}</td><td>{f.redacted}</td></tr>\n"
+            )
+        html_path = os.path.join(self.output_dir, f"git_{slug}_{ts}.html")
+        with open(html_path, "w") as fh:
+            fh.write(
+                f"<html><head><title>KittyPaw Git Report — {target_label}</title>"
+                f"<style>body{{background:#0d1117;color:#c9d1d9;font-family:monospace}}"
+                f"table{{border-collapse:collapse;width:100%}}"
+                f"th,td{{border:1px solid #30363d;padding:6px 10px;text-align:left}}"
+                f"th{{background:#161b22}}</style></head><body>"
+                f"<h2>🐾 KittyPaw Git Report — {target_label}</h2>"
+                f"<p>{ts} UTC &nbsp;|&nbsp; {len(findings)} findings &nbsp;|&nbsp; "
+                f"{len(scan_results)} repos scanned</p>"
+                f"<table><tr><th>Severity</th><th>Repo</th><th>Location</th>"
+                f"<th>Description</th><th>Hint</th></tr>{rows}</table>"
+                f"</body></html>"
+            )
+
+        return json_path, html_path
+
+    def save_disclosure_draft(self, findings, target_name: str, output_dir: str) -> str:
+        """
+        Generate a Markdown disclosure draft pre-filled with finding data.
+        Returns the file path, or empty string if no critical/high findings.
+        """
+        from datetime import datetime, timezone
+
+        critical_high = [f for f in findings if getattr(f, "severity", "") in ("CRITICAL", "HIGH")]
+        if not critical_high:
+            return ""
+
+        ts   = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        slug = re.sub(r"[^a-zA-Z0-9_-]", "_", target_name)[:30]
+        path = os.path.join(output_dir, f"disclosure_{slug}_{ts}.md")
+
+        top = critical_high[0]
+        sev = top.severity
+        desc = top.description
+
+        finding_lines = ""
+        for i, f in enumerate(critical_high, 1):
+            finding_lines += (
+                f"### Finding {i} — {f.severity}\n"
+                f"- **Location:** `{getattr(f, 'repo_or_url', '')}` → `{getattr(f, 'location', '')}`\n"
+                f"- **Type:** {f.description}\n"
+                f"- **Verified:** {'Yes (TruffleHog)' if getattr(f, 'verified', False) else 'No'}\n"
+                f"- **Evidence (redacted):** `{getattr(f, 'redacted', '') or '[see report]'}`\n\n"
+            )
+
+        draft = f"""# Bug Bounty Disclosure — {target_name}
+
+**Date:** {ts[:10]}
+**Severity:** {sev}
+**Program:** {target_name}
+**Researcher:** [Your Name / Handle]
+
+---
+
+## Summary
+
+A {sev.lower()} severity vulnerability was identified involving {desc.lower()} in the
+`{target_name}` repository. This finding was detected using automated git history analysis
+and confirmed with entropy-based key validation.
+
+---
+
+## Findings
+
+{finding_lines}
+
+---
+
+## Steps to Reproduce
+
+1. [ADD: specific commands or URL that reproduces the issue]
+2. [ADD: proof-of-concept details]
+3. [ADD: screenshot or terminal output]
+
+---
+
+## Impact
+
+If exploited, this vulnerability could allow an attacker to:
+- [ADD: specific impact — e.g., drain funds, access accounts]
+- [ADD: estimated financial risk]
+
+---
+
+## Suggested Fix
+
+- Rotate all exposed credentials immediately
+- Use environment variables / secrets managers (not hardcoded values)
+- Add pre-commit hooks (gitleaks) to prevent future exposure
+- Purge the secret from git history using `git filter-repo`
+
+---
+
+## CVSS Score Estimate
+
+| Metric       | Value   |
+|--------------|---------|
+| Attack Vector| Network |
+| Complexity   | Low     |
+| Privileges   | None    |
+| User Interaction | None |
+| Scope        | Unchanged |
+| Confidentiality | High |
+| Integrity    | High    |
+| Availability | High    |
+
+**Estimated CVSS 3.1 Base Score: 9.8 (Critical)**
+
+---
+
+*Generated by KittyPaw Scanner — for authorized security research only.*
+"""
+
+        os.makedirs(output_dir, exist_ok=True)
+        with open(path, "w") as fh:
+            fh.write(draft)
+        return path

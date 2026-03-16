@@ -268,6 +268,11 @@ class TelegramNotifier:
         )
 
 
+    def send_raw(self, text: str) -> None:
+        """Send an arbitrary HTML-formatted message. Used by autohunt and telegram_bot."""
+        self._send(text)
+
+
 def _now() -> str:
     """Current UTC time as a clean string."""
     from datetime import datetime, timezone
