@@ -255,6 +255,8 @@ Examples:
   python3 autohunt.py --top-n 5 --max-repos 3 --no-external-tools
         """,
     )
+    p.add_argument("--targets", action="store_true",
+                   help="List current Immunefi bounty targets and exit (no scanning)")
     p.add_argument("--repo",   metavar="URL", help="Scan a single GitHub repo")
     p.add_argument("--org",    metavar="URL", help="Scan all public repos in a GitHub org")
     p.add_argument("--top-n",  metavar="N",   type=int, default=10,
@@ -271,6 +273,27 @@ Examples:
     return p.parse_args()
 
 
+def _cmd_targets(top_n: int = 10) -> int:
+    """List current Immunefi bounty targets without scanning."""
+    from modules.immunefi_scraper import ImmunefiScraper
+    _sec("Immunefi Bounty Targets")
+    _status("⟳", "Fetching programs …", DIM)
+    targets = ImmunefiScraper().fetch(top_n=top_n)
+    if not targets:
+        _status("✘", "Could not fetch targets — check network", RED)
+        return 1
+    print()
+    print(f"  {'#':>2}  {'Program':<30}  {'Max Bounty':>14}  Bounty URL")
+    print(f"  {'─'*2}  {'─'*30}  {'─'*14}  {'─'*40}")
+    for i, t in enumerate(targets, 1):
+        payout = f"${t.max_usd:,}" if t.max_usd else "unknown"
+        url    = t.bounty_url or ""
+        print(f"  {i:>2}. {BOLD}{t.name:<30}{R}  {GRN}{payout:>14}{R}  {DIM}{url}{R}")
+    print()
+    _status("✔", f"{len(targets)} programs listed", GRN)
+    return 0
+
+
 def main() -> int:
     args = _parse_args()
 
@@ -280,6 +303,9 @@ def main() -> int:
     )
 
     print(BANNER)
+
+    if args.targets:
+        return _cmd_targets(args.top_n)
 
     if not args.yes:
         print(f"  {YEL}⚠  Only scan repos you are authorized to test.{R}")

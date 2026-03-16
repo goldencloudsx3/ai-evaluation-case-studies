@@ -7,18 +7,15 @@ Fetches active bounty programs, extracts GitHub org URLs, ranks by max payout.
 from __future__ import annotations
 
 import re
-import time
 import json
 import logging
 from dataclasses import dataclass, field
 from typing import List, Optional
 
 import requests
-from bs4 import BeautifulSoup
 
 log = logging.getLogger(__name__)
 
-_API_URL   = "https://immunefi.com/tilts-data/bounties.json"
 _EXPLORE   = "https://immunefi.com/explore/"
 _HEADERS   = {"User-Agent": "Mozilla/5.0 (compatible; KittyPawScanner/2.0)"}
 _TIMEOUT   = 15
@@ -56,42 +53,13 @@ class ImmunefiScraper:
     def fetch(self, top_n: int = 20) -> List[BountyTarget]:
         """
         Return up to *top_n* bounty targets sorted by max payout (descending).
-        Tries the JSON data endpoint first, falls back to HTML scraping.
+        Parses Immunefi's explore page (React Server Components streaming format).
         """
-        targets = self._fetch_json()
-        if not targets:
-            log.warning("JSON endpoint failed — falling back to HTML scrape")
-            targets = self._fetch_html()
+        targets = self._fetch_html()
 
         # Sort by payout descending
         targets.sort(key=lambda t: t.max_usd, reverse=True)
         return targets[:top_n]
-
-    # ── Internal: JSON endpoint ───────────────────────────────────────────────
-
-    def _fetch_json(self) -> List[BountyTarget]:
-        try:
-            r = self.session.get(_API_URL, timeout=self.timeout)
-            r.raise_for_status()
-            data = r.json()
-        except Exception as exc:
-            log.debug("JSON fetch failed: %s", exc)
-            return []
-
-        targets: List[BountyTarget] = []
-
-        # Handle both {"bounties": [...]} and plain list formats
-        items = data if isinstance(data, list) else data.get("bounties", [])
-
-        for item in items:
-            try:
-                target = self._parse_json_item(item)
-                if target:
-                    targets.append(target)
-            except Exception as exc:
-                log.debug("Failed to parse item %s: %s", item.get("project", "?"), exc)
-
-        return targets
 
     def _parse_json_item(self, item: dict) -> Optional[BountyTarget]:
         name = item.get("project") or item.get("name") or item.get("id", "")
@@ -113,7 +81,18 @@ class ImmunefiScraper:
         gh_url, gh_org = self._extract_github(item)
 
         scope_urls = self._extract_scope_urls(item)
-        bounty_url = item.get("url") or item.get("link") or ""
+        # RSC data has a relative "url" like "/bug-bounty/layerzero/information/"
+        # or a slug field; normalise to an absolute Immunefi URL.
+        raw_url = item.get("url") or item.get("link") or ""
+        slug    = item.get("slug", "")
+        if raw_url.startswith("/"):
+            bounty_url = f"https://immunefi.com{raw_url}"
+        elif raw_url:
+            bounty_url = raw_url
+        elif slug:
+            bounty_url = f"https://immunefi.com/bug-bounty/{slug}/"
+        else:
+            bounty_url = ""
 
         return BountyTarget(
             name=name,
@@ -124,7 +103,7 @@ class ImmunefiScraper:
             bounty_url=bounty_url,
         )
 
-    # ── Internal: HTML fallback ───────────────────────────────────────────────
+    # ── Internal: HTML fetch (RSC streaming format) ───────────────────────────
 
     def _fetch_html(self) -> List[BountyTarget]:
         try:
@@ -135,45 +114,66 @@ class ImmunefiScraper:
             return []
 
         targets: List[BountyTarget] = []
-        soup = BeautifulSoup(r.text, "lxml")
 
-        # Immunefi embeds __NEXT_DATA__ JSON in HTML pages
-        script = soup.find("script", {"id": "__NEXT_DATA__"})
-        if script and script.string:
+        # Immunefi uses React Server Components (RSC) streaming.
+        # Bounty data is embedded in: self.__next_f.push([1,"<escaped-json>"])
+        rsc_chunks = re.findall(
+            r'self\.__next_f\.push\(\[1,"(.+?)"\]\)', r.text, re.DOTALL
+        )
+        for chunk in rsc_chunks:
             try:
-                payload = json.loads(script.string)
-                # Drill into Next.js page props
-                bounties = (
-                    payload.get("props", {})
-                           .get("pageProps", {})
-                           .get("bounties", [])
-                )
-                for item in bounties:
+                # Unescape the JSON string value
+                unescaped = chunk.encode().decode("unicode_escape")
+            except Exception:
+                continue
+
+            if '"maxBounty"' not in unescaped:
+                continue
+
+            # The bounties array looks like: [{"contentfulId":..., "maxBounty":...}, ...]
+            # followed by ,"title":"Bug Bounties"
+            match = re.search(
+                r'\[(\{"contentfulId".+?)\](?=,\s*"title")',
+                unescaped,
+                re.DOTALL,
+            )
+            if not match:
+                continue
+            try:
+                items = json.loads("[" + match.group(1) + "]")
+            except json.JSONDecodeError as exc:
+                log.debug("RSC JSON decode failed: %s", exc)
+                continue
+
+            for item in items:
+                try:
                     t = self._parse_json_item(item)
                     if t:
                         targets.append(t)
-                return targets
-            except Exception as exc:
-                log.debug("__NEXT_DATA__ parse failed: %s", exc)
+                except Exception as exc:
+                    log.debug("Failed to parse RSC item: %s", exc)
 
-        # Last-resort: regex over raw HTML
+            if targets:
+                log.info("RSC parse: found %d bounty programs", len(targets))
+                return targets  # success — no need to scan further chunks
+
+        # Last-resort: extract GitHub org links by regex over raw HTML
+        log.warning("RSC parse yielded no targets — falling back to GitHub URL extraction")
+        seen: set = set()
         for m in _GH_ORG_RE.finditer(r.text):
-            org  = m.group(1)
-            gh   = f"https://github.com/{org}"
+            org = m.group(1)
+            if org.lower() in ("torvalds", "github", "features", "apps"):
+                continue
+            if org in seen:
+                continue
+            seen.add(org)
             targets.append(BountyTarget(
                 name=org, max_usd=0,
-                github_org_url=gh, github_org=org,
+                github_org_url=f"https://github.com/{org}",
+                github_org=org,
             ))
 
-        # Deduplicate by github_org
-        seen: set = set()
-        unique: List[BountyTarget] = []
-        for t in targets:
-            key = t.github_org or t.name
-            if key not in seen:
-                seen.add(key)
-                unique.append(t)
-        return unique
+        return targets
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
