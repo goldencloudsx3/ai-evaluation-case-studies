@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 KittyPaw Scanner — Crypto Vulnerability Testing Engine
-Repo  : https://github.com/goldencloudsx3/GitSheild
 Alerts: t.me/Kittypawscannerbot
 
 Modules: IDOR · Key Exposure · JWT · Security Headers · Token Entropy
@@ -47,17 +46,75 @@ BOLD = "\033[1m"
 
 SEV_COLOR = {"CRITICAL": RED, "HIGH": YEL, "MEDIUM": BLU, "LOW": GRN, "INFO": DIM}
 
-_BW = 56
-BANNER = (
-    f"\n{GRN}{BOLD}"
-    f"  ╔{'═'*_BW}╗\n"
-    f"  ║{'K I T T Y P A W   S C A N N E R':^{_BW}}║\n"
-    f"  ║{'─'*_BW}║\n"
-    f"  ║{'IDOR · KEY-EXPOSURE · JWT · HEADERS · TOKENS':^{_BW}}║\n"
-    f"  ║{'github.com/goldencloudsx3/GitSheild':^{_BW}}║\n"
-    f"  ╚{'═'*_BW}╝{R}\n"
-    f"  {DIM}{'[ authorized security testing only ]':^{_BW+4}}{R}\n"
-)
+# ── ASCII banner ───────────────────────────────────────────────────────────────
+#
+#  Gradient: CYAN top → GREEN middle → YELLOW bottom
+#  Cat art left column, tool info right column
+#
+_W = 62
+
+_CAT = [
+    r"    /\_____/\ ",
+    r"   /  o   o  \ ",
+    r"  ( ==  ^  == )",
+    r"   )  =====  ( ",
+    r"  (    ___    )",
+    r"   \___|_|___/ ",
+    r"       | |     ",
+    r"      _| |_    ",
+]
+
+_INFO = [
+    f"{BOLD}{CYAN}K I T T Y P A W   S C A N N E R{R}",
+    f"{DIM}{'─' * 33}{R}",
+    f"{GRN}IDOR · KEY-EXPOSURE · JWT{R}",
+    f"{GRN}HEADERS · TOKENS · WEB3{R}",
+    f"{DIM}{'─' * 33}{R}",
+    f"{YEL}t.me/Kittypawscannerbot{R}",
+    f"{DIM}Immunefi · HackerOne · Bugcrowd{R}",
+    f"{DIM}[ authorized testing only ]{R}",
+]
+
+def _build_banner() -> str:
+    top    = f"{CYAN}{BOLD}  ╔{'═' * _W}╗{R}"
+    bot    = f"{CYAN}{BOLD}  ╚{'═' * _W}╝{R}"
+    spacer = f"{CYAN}{BOLD}  ║{R}{'': <{_W}}{CYAN}{BOLD}║{R}"
+    lines  = ["\n", top, spacer]
+    cat_colors = [MAG, MAG, CYAN, CYAN, GRN, GRN, YEL, YEL]
+    for i, (cat, info) in enumerate(zip(_CAT, _INFO)):
+        col    = cat_colors[i % len(cat_colors)]
+        cat_s  = f"{col}{BOLD}{cat:<16}{R}"
+        # Strip ANSI for width calculation
+        import re as _re
+        plain  = _re.sub(r'\033\[[0-9;]*m', '', info)
+        pad    = _W - 16 - 1 - len(plain)
+        pad    = max(pad, 0)
+        inner  = f" {cat_s} {info}{' ' * pad}"
+        lines.append(f"{CYAN}{BOLD}  ║{R}{inner}{CYAN}{BOLD}║{R}")
+    lines += [spacer, bot, ""]
+    return "\n".join(lines)
+
+BANNER = _build_banner()
+
+
+def _flash_critical(finding) -> None:
+    """
+    Print a loud, red-bordered alert box when a CRITICAL finding is detected.
+    Called immediately when key material is found during scanning.
+    """
+    w = 60
+    url   = getattr(finding, "endpoint", "unknown")
+    ref   = getattr(finding, "reference_id", "?")
+    keys  = getattr(finding, "keys_found", [])
+    ktype = keys[0].get("type_name", "Key material") if keys else "Sensitive data"
+
+    print(f"\n{RED}{BOLD}  ╔{'█' * w}╗")
+    print(f"  ║{'  🔴  C R I T I C A L   F I N D I N G  🔴  ':^{w}}║")
+    print(f"  ║{'█' * w}╣")
+    print(f"  ║  {'URL  :':<8} {url[:w-12]:<{w-10}}║")
+    print(f"  ║  {'ID   :':<8} {str(ref)[:w-12]:<{w-10}}║")
+    print(f"  ║  {'TYPE :':<8} {ktype[:w-12]:<{w-10}}║")
+    print(f"  ╚{'═' * w}╝{R}\n")
 
 # ── User-Agent pool (rotate to avoid trivial UA-based blocking) ────────────────
 _USER_AGENTS = [
@@ -647,9 +704,17 @@ def _run_scan(args, target, tg=None) -> int:
     def _tracked_test(base_url, pattern, obj_id, baseline):
         spinner.increment()
         finding = _orig_test(base_url, pattern, obj_id, baseline)
-        # Real-time Telegram alert for CRITICAL/HIGH findings
-        if finding and tg:
-            tg.send_finding(finding)
+        if finding:
+            # Flash loud terminal alert for CRITICAL hits immediately
+            if finding.severity == "CRITICAL":
+                spinner.stop("CRITICAL FINDING — pausing spinner")
+                _flash_critical(finding)
+                spinner._stop.clear()
+                spinner._thread = threading.Thread(target=spinner._spin, daemon=True)
+                spinner.start()
+            # Real-time Telegram alert for CRITICAL/HIGH findings
+            if tg:
+                tg.send_finding(finding)
         return finding
 
     scanner._test_endpoint = _tracked_test

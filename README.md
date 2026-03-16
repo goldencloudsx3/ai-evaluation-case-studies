@@ -9,7 +9,7 @@
   ║            K I T T Y P A W   S C A N N E R            ║
   ║────────────────────────────────────────────────────────║
   ║       IDOR · KEY-EXPOSURE · JWT · HEADERS · TOKENS     ║
-  ║          github.com/goldencloudsx3/GitSheild           ║
+  ║          github.com/GitSheild           ║
   ╚════════════════════════════════════════════════════════╝
 ```
 
