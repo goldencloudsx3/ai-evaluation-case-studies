@@ -320,7 +320,8 @@ def run_trufflehog(scan_path, report_prefix):
             ["trufflehog", "filesystem", str(scan_path), "--json", "--no-update"],
             capture_output=True, text=True, timeout=300,
         )
-        report_path.write_text(result.stdout)
+        if result.stdout.strip():
+            report_path.write_text(result.stdout)
         for line in result.stdout.strip().splitlines():
             try:
                 findings.append(json.loads(line))
@@ -400,11 +401,14 @@ def scan_repo(repo_dir, repo_name, repo_full_name,
         "total_findings": total,
     }
 
-    json_path = REPORTS_DIR / f"{prefix}_report.json"
-    json_path.write_text(json.dumps(report_data, indent=2))
-
-    html_path = REPORTS_DIR / f"{prefix}_report.html"
-    generate_html_report(report_data, html_path)
+    if total > 0:
+        json_path = REPORTS_DIR / f"{prefix}_report.json"
+        json_path.write_text(json.dumps(report_data, indent=2))
+        html_path = REPORTS_DIR / f"{prefix}_report.html"
+        generate_html_report(report_data, html_path)
+    else:
+        json_path = None
+        html_path = None
 
     # Cleanup extracted blobs after scanning
     if deep_result:
@@ -1076,6 +1080,25 @@ def run_private_mode():
             log.error(f"Private mode error: {e}")
         time.sleep(PRIVATE_POLL)
 
+def _enough_disk(min_gb=1.0):
+    """Return True if at least min_gb of free space remains on BASE_DIR's partition."""
+    try:
+        stat = shutil.disk_usage(BASE_DIR)
+        return (stat.free / (1024 ** 3)) >= min_gb
+    except Exception:
+        return True  # assume OK if check fails
+
+
+def _prune_reports(max_keep=100):
+    """Delete oldest report files beyond max_keep to prevent unbounded growth."""
+    try:
+        files = sorted(REPORTS_DIR.iterdir(), key=lambda p: p.stat().st_mtime)
+        for f in files[:-max_keep]:
+            f.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 def run_public_mode():
     ui.print_banner(mode="public")
     ui.info("Monitoring GitHub public events firehose…")
@@ -1084,12 +1107,17 @@ def run_public_mode():
     state = load_state()
     scanned = set(state.get("scanned_public", []))
     while True:
+        _prune_reports(max_keep=100)
         try:
             events, etag = get_public_events(etag)
             push_events  = [e for e in events if e.get("type") == "PushEvent"]
             for event in push_events:
                 full_name = event.get("repo", {}).get("name", "")
                 if not full_name or full_name in scanned:
+                    continue
+                if not _enough_disk(min_gb=1.0):
+                    log.warning("Low disk space (<1 GB free) — skipping scan, pruning reports")
+                    _prune_reports(max_keep=20)
                     continue
                 repo_name = full_name.split("/")[-1]
                 repo_dir  = REPOS_DIR / f"pub_{hashlib.md5(full_name.encode()).hexdigest()[:8]}_{repo_name}"
@@ -1104,6 +1132,8 @@ def run_public_mode():
                     save_state(state)
                 except Exception as e:
                     log.error(f"Public scan error {full_name}: {e}")
+                finally:
+                    shutil.rmtree(repo_dir, ignore_errors=True)
         except Exception as e:
             log.error(f"Public mode error: {e}")
         time.sleep(PUBLIC_POLL)
