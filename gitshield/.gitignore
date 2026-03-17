@@ -1,0 +1,9 @@
+.env
+*.pyc
+__pycache__/
+~/gitshield/repos/
+~/gitshield/reports/
+~/gitshield/state.json
+~/gitshield/earnings.json
+~/gitshield/gitshield.log
+.DS_Store
