@@ -48,18 +48,48 @@ SEV_ICON = {"CRITICAL": f"{RED}🔴{R}", "HIGH": f"{YEL}🟠{R}",
 
 _W = 62
 
-BANNER = f"""\n{CYAN}{BOLD}  ╔══════════════════════════════════════════════════════════════╗
-  ║                                                              ║
-  ║     /\\_____/\\    K I T T Y P A W   S C A N N E R              ║
-  ║    /  o   o  \\   ─────────────────────────────────            ║
-  ║   ( ==  ^  == )  IDOR · KEY-EXPOSURE · JWT                    ║
-  ║    )  =====  (   HEADERS · TOKENS · WEB3                      ║
-  ║   (    ___    )  ─────────────────────────────────            ║
-  ║    \\___|_|___/   t.me/Kittypawscannerbot                      ║
-  ║        | |       Immunefi · HackerOne · Bugcrowd              ║
-  ║       _| |_      [ authorized testing only ]                  ║
-  ║                                                              ║
-  ╚══════════════════════════════════════════════════════════════╝{R}\n"""
+_CAT = [
+    r"    /\_____/\ ",
+    r"   /  o   o  \ ",
+    r"  ( ==  ^  == )",
+    r"   )  =====  ( ",
+    r"  (    ___    )",
+    r"   \___|_|___/ ",
+    r"       | |     ",
+    r"      _| |_    ",
+]
+
+_INFO = [
+    f"{BOLD}{CYAN}K I T T Y P A W   A U T O - H U N T{R}",
+    f"{DIM}{'─' * 33}{R}",
+    f"{GRN}Immunefi  ·  GitHub  ·  Deep Git History{R}",
+    f"{GRN}Secrets · Leaked Keys · Web3{R}",
+    f"{DIM}{'─' * 33}{R}",
+    f"{YEL}t.me/Kittypawscannerbot{R}",
+    f"{DIM}Immunefi · HackerOne · Bugcrowd{R}",
+    f"{DIM}[ authorized security testing only ]{R}",
+]
+
+
+def _build_banner() -> str:
+    import re as _re
+    top    = f"{CYAN}{BOLD}  ╔{'═' * _W}╗{R}"
+    bot    = f"{CYAN}{BOLD}  ╚{'═' * _W}╝{R}"
+    spacer = f"{CYAN}{BOLD}  ║{R}{'': <{_W}}{CYAN}{BOLD}║{R}"
+    lines  = ["\n", top, spacer]
+    cat_colors = [MAG, MAG, CYAN, CYAN, GRN, GRN, YEL, YEL]
+    for i, (cat, info) in enumerate(zip(_CAT, _INFO)):
+        col   = cat_colors[i % len(cat_colors)]
+        cat_s = f"{col}{BOLD}{cat:<16}{R}"
+        plain = _re.sub(r'\033\[[0-9;]*m', '', info)
+        pad   = max(_W - 16 - 1 - len(plain), 0)
+        inner = f" {cat_s} {info}{' ' * pad}"
+        lines.append(f"{CYAN}{BOLD}  ║{R}{inner}{CYAN}{BOLD}║{R}")
+    lines += [spacer, bot, ""]
+    return "\n".join(lines)
+
+
+BANNER = _build_banner()
 
 
 def _sec(title: str) -> None:
