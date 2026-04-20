@@ -38,6 +38,14 @@ from pathlib import Path
 # ── Import GitShield modules ──────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent))
 from modules import immunefi, deep_scan, disclosure, earnings
+
+# ── Optional Solidity analyzer (graceful degradation if unavailable) ──────────
+sys.path.insert(0, str(Path(__file__).parent.parent))
+try:
+    from modules.solidity_analyzer import SolidityAnalyzer as _SolAnalyzer
+    _SOL_ANALYZER_AVAILABLE = True
+except ImportError:
+    _SOL_ANALYZER_AVAILABLE = False
 from modules import ui
 
 # ── Load .env if present ──────────────────────────────────────────────────────
@@ -369,7 +377,25 @@ def scan_repo(repo_dir, repo_name, repo_full_name,
                 "_raw": token,
             })
 
-    total = len(gl_findings) + len(th_findings)
+    # ── Solidity static analysis on any .sol files found ─────────────────────
+    sol_findings = []
+    if _SOL_ANALYZER_AVAILABLE:
+        sol_analyzer = _SolAnalyzer()
+        for sol_file in Path(repo_dir).rglob("*.sol"):
+            try:
+                src = sol_file.read_text(errors="replace")
+                hits = sol_analyzer.analyze(src, sol_file.name)
+                sol_findings.extend([h.to_dict() for h in hits])
+            except Exception:
+                pass
+        if sol_findings:
+            criticals = [f for f in sol_findings if f["severity"] == "CRITICAL"]
+            log.warning(
+                f"Smart contract analysis: {len(sol_findings)} vuln(s) found "
+                f"({len(criticals)} CRITICAL) in {repo_full_name}"
+            )
+
+    total = len(gl_findings) + len(th_findings) + len(sol_findings)
 
     # Update state stats
     state = load_state()
@@ -398,6 +424,7 @@ def scan_repo(repo_dir, repo_name, repo_full_name,
         } if deep_result else {},
         "gitleaks": gl_findings,
         "trufflehog": th_findings,
+        "solidity_vulns": sol_findings,
         "total_findings": total,
     }
 
@@ -424,6 +451,7 @@ def generate_html_report(data, output_path):
     source      = data["source"]
     gl          = data["gitleaks"]
     th          = data["trufflehog"]
+    sol         = data.get("solidity_vulns", [])
     total       = data["total_findings"]
     deep_stats  = data.get("deep_stats", {})
     status       = "CRITICAL" if total > 0 else "CLEAN"
@@ -464,6 +492,24 @@ def generate_html_report(data, output_path):
                 <td><code>{detector}</code></td>
                 <td><code>{file_}</code></td>
                 <td>{line_} {"✓ VERIFIED LIVE" if verified else ""}</td>
+            </tr>"""
+        return rows
+
+    def sol_rows():
+        if not sol:
+            return "<tr><td colspan='5' style='text-align:center;color:#666;padding:20px'>No Solidity files found</td></tr>"
+        _sev_colors = {"CRITICAL": "#ff4444", "HIGH": "#ffaa00", "MEDIUM": "#4488ff", "LOW": "#44cc44", "INFO": "#aaaaaa"}
+        rows = ""
+        for f in sol:
+            sev = f.get("severity", "INFO")
+            col = _sev_colors.get(sev, "#aaaaaa")
+            rows += f"""
+            <tr>
+              <td><span style="color:{col};font-weight:bold">{f.get('vuln_id','?')}</span></td>
+              <td><span style="color:{col}">{sev}</span></td>
+              <td>{f.get('title','?')}</td>
+              <td><code>{f.get('file','?')}:{f.get('line','?')}</code></td>
+              <td>{f.get('feasibility','?')}/10</td>
             </tr>"""
         return rows
 
@@ -607,10 +653,21 @@ def generate_html_report(data, output_path):
       <tbody>{th_rows()}</tbody>
     </table>
   </div>
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">Smart Contract Vulnerabilities</div>
+      <div class="section-badge">{len(sol)} issues</div>
+      <div class="tool-tag">SOLIDITY-ANALYZER</div>
+    </div>
+    <table>
+      <thead><tr><th>ID</th><th>Severity</th><th>Title</th><th>Location</th><th>Feasibility</th></tr></thead>
+      <tbody>{sol_rows()}</tbody>
+    </table>
+  </div>
   {_immunefi_checklist(gl, th, data.get('deep', False), data.get('deep_stats', {}))}
   <div class="footer">
     <span>⬡ GitShield Security Scanner</span>
-    <span>Generated {timestamp} · Gitleaks + TruffleHog</span>
+    <span>Generated {timestamp} · Gitleaks + TruffleHog + SolidityAnalyzer</span>
   </div>
 </div>
 </body>
@@ -846,6 +903,17 @@ def alert_findings(report_data, json_path, html_path):
         msg += f"  ▸ `{det}`{ver}\n"
     if len(th) > 3:
         msg += f"  _...+{len(th)-3} more_\n"
+    sol = report_data.get("solidity_vulns", [])
+    if sol:
+        criticals = [f for f in sol if f.get("severity") == "CRITICAL"]
+        msg += f"\n🔴 *Smart Contract Vulns ({len(sol)}):*\n"
+        for f in sol[:4]:
+            sev_icon = "🔴" if f.get("severity") == "CRITICAL" else "🟠" if f.get("severity") == "HIGH" else "🟡"
+            msg += f"  {sev_icon} `{f.get('vuln_id','?')}` {f.get('title','?')[:50]}\n"
+        if len(sol) > 4:
+            msg += f"  _...+{len(sol)-4} more_\n"
+        if criticals:
+            msg += f"\n⚡ *{len(criticals)} CRITICAL contract vuln(s)* — potential on-chain exploit\n"
     msg += f"\n_Rotate any exposed keys immediately._\n"
     if verified:
         msg += (
